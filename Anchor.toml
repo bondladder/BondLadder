@@ -1,0 +1,21 @@
+[toolchain]
+anchor_version = "0.32.1"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.devnet]
+bond_ladder = "5aKvW5hFUGw5hKzpz5DRYBK26EADqRHHgknmCU1EGNHe"
+rating_oracle = "EWhJjvNVb5mh1Jb9DTzvTwk7BeS9qdZdK7a6vdneQPa9"
+mock_issuer = "EX1tNj2MLTacJPfAVzbBW8ejFsnSp7AsnZvnRLmDy3vK"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "devnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "pnpm vitest run tests/"

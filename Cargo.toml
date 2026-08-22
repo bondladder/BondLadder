@@ -1,0 +1,27 @@
+[workspace]
+members = ["programs/*"]
+resolver = "2"
+
+# Макроси Anchor розгортають cfg, яких хостова ціль не знає: target_os="solana"
+# існує лише для SBF, а custom-heap/custom-panic вмикає лінкер програми.
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+  'cfg(target_os, values("solana"))',
+  'cfg(feature, values("custom-heap", "custom-panic", "anchor-debug"))',
+] }
+
+[workspace.dependencies]
+anchor-lang = "0.32.1"
+anchor-spl = "0.32.1"
+
+# overflow-checks у release — не оптимізація, а вимога SC-005: мовчазне
+# переповнення в розподілі депозиту виглядало б як загублені кошти.
+[profile.release]
+overflow-checks = true
+lto = "fat"
+codegen-units = 1
+
+[profile.release.build-override]
+opt-level = 3
+incremental = false
+codegen-units = 1

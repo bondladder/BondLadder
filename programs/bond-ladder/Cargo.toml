@@ -1,0 +1,50 @@
+[package]
+name = "bond-ladder"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "bond_ladder"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+anchor-debug = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+
+[dependencies]
+anchor-lang = { workspace = true }
+anchor-spl = { workspace = true }
+# Читання рейтингу і викуп інструмента — це CPI у сусідні програми,
+# а модулі ::cpi існують лише під цією ознакою.
+rating-oracle = { path = "../rating-oracle", features = ["cpi"] }
+mock-issuer = { path = "../mock-issuer", features = ["cpi"] }
+
+
+[dev-dependencies]
+# litesvm на Anchor 0.32.1 не збирається (E0027 на touched_flags) —
+# див. docs/PLAN.md, Complexity Tracking.
+mollusk-svm = "0.15.0"
+# Справжній байткод SPL Token у тесті: перший переказ чужих коштів не можна
+# перевіряти підробленим токен-акаунтом.
+mollusk-svm-programs-token = { version = "0.15.0", default-features = false, features = [
+  "token",
+] }
+# Версії підібрані під mollusk 0.15: він приймає Instruction саме з цих крейтів.
+solana-account = "4.3.2"
+solana-address = "2.6.1"
+solana-instruction = "3.4.1"
+solana-instruction-error = "2.4.0"
+solana-program-pack = "3.1.0"
+spl-token-interface = "2.0.0"
+# Події Anchor читаються лише з логів, а лог Program data: закодований у base64.
+solana-svm-log-collector = "4.2.1"
+base64 = "0.22.1"

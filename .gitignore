@@ -1,0 +1,19 @@
+node_modules/
+dist/
+.turbo/
+target/
+*.tsbuildinfo
+
+.env
+*.env.*
+!.env.example
+*.local
+
+# Ключі — ніколи в репозиторії
+*.keypair.json
+*-keypair.json
+id.json
+
+# Робочі документи лишаються лише в робочій копії
+*.md
+!README.md

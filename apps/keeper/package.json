@@ -1,0 +1,16 @@
+{
+  "name": "@bondladder/keeper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --experimental-strip-types src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.0",
+    "typescript": "^5.9.0",
+    "@types/node": "^22.10.0"
+  }
+}
