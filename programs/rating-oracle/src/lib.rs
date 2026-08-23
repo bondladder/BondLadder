@@ -1,5 +1,7 @@
 use anchor_lang::prelude::*;
 
+pub mod scale;
+
 declare_id!("EWhJjvNVb5mh1Jb9DTzvTwk7BeS9qdZdK7a6vdneQPa9");
 
 /// Джерело нормалізованих кредитних рейтингів. Самостійна програма, а не поле
