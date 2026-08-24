@@ -37,17 +37,40 @@ pub const fn meets_threshold(notch: u8, worst_allowed: u8) -> bool {
 mod tests {
     use super::*;
 
-    const PUBLISHED_ORDER: [&str; 22] = [
-        "AAA", "AA+", "AA", "AA-", "A+", "A", "A-", "BBB+", "BBB", "BBB-", "BB+", "BB", "BB-",
-        "B+", "B", "B-", "CCC+", "CCC", "CCC-", "CC", "C", "D",
-    ];
+    /// Той самий файл читає packages/shared/src/scale.test.ts. include_str!
+    /// навмисно: пропалий фікстур має ламати збірку тестів, а не мовчки
+    /// пропускати перевірку.
+    const SHARED_FIXTURE: &str = include_str!("../../../fixtures/scale.json");
 
     #[test]
-    fn scale_matches_the_published_order() {
-        for (index, label) in PUBLISHED_ORDER.iter().enumerate() {
-            let notch = index as u8 + 1;
+    fn scale_matches_the_shared_fixture() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(SHARED_FIXTURE).expect("fixtures/scale.json — валідний JSON");
+
+        assert_eq!(
+            fixture["scaleVersion"].as_u64(),
+            Some(u64::from(SCALE_VERSION))
+        );
+
+        let notches = fixture["notches"].as_array().expect("notches — масив");
+        assert_eq!(notches.len(), usize::from(NOTCH_WORST));
+
+        for entry in notches {
+            let notch = u8::try_from(entry["notch"].as_u64().expect("notch — число"))
+                .expect("notch не виходить за u8");
+            let label = entry["label"].as_str().expect("label — рядок");
+
             assert_eq!(notch_for_label(label), Some(notch), "мітка {label}");
-            assert_eq!(label_for_notch(notch), Some(*label), "щабель {notch}");
+            assert_eq!(label_for_notch(notch), Some(label), "щабель {notch}");
+        }
+
+        let rejected = fixture["rejectedLabels"]
+            .as_array()
+            .expect("rejectedLabels — масив");
+
+        for entry in rejected {
+            let label = entry.as_str().expect("мітка — рядок");
+            assert_eq!(notch_for_label(label), None, "мітка {label:?}");
         }
     }
 
@@ -56,7 +79,6 @@ mod tests {
         assert_eq!(notch_for_label("AAA"), Some(NOTCH_BEST));
         assert_eq!(notch_for_label("BBB-"), Some(10));
         assert_eq!(notch_for_label("D"), Some(NOTCH_WORST));
-        assert_eq!(NOTCH_WORST, PUBLISHED_ORDER.len() as u8);
     }
 
     #[test]
@@ -78,15 +100,6 @@ mod tests {
         assert!(is_valid_notch(NOTCH_WORST));
         assert!(!is_valid_notch(0));
         assert!(!is_valid_notch(NOTCH_WORST + 1));
-    }
-
-    #[test]
-    fn unknown_labels_are_rejected_rather_than_guessed() {
-        for label in [
-            "", "aaa", " AAA", "AAA ", "AAAA", "A++", "AA--", "DD", "1", "Aaa", "Baa1",
-        ] {
-            assert_eq!(notch_for_label(label), None, "мітка {label:?}");
-        }
     }
 
     #[test]

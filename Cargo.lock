@@ -2443,6 +2443,7 @@ dependencies = [
  "anchor-lang",
  "anchor-spl",
  "mollusk-svm",
+ "serde_json",
  "solana-account 4.3.2",
  "solana-address 2.6.1",
  "solana-instruction 3.4.1",

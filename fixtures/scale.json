@@ -1,0 +1,28 @@
+{
+  "scaleVersion": 1,
+  "notches": [
+    { "notch": 1, "label": "AAA" },
+    { "notch": 2, "label": "AA+" },
+    { "notch": 3, "label": "AA" },
+    { "notch": 4, "label": "AA-" },
+    { "notch": 5, "label": "A+" },
+    { "notch": 6, "label": "A" },
+    { "notch": 7, "label": "A-" },
+    { "notch": 8, "label": "BBB+" },
+    { "notch": 9, "label": "BBB" },
+    { "notch": 10, "label": "BBB-" },
+    { "notch": 11, "label": "BB+" },
+    { "notch": 12, "label": "BB" },
+    { "notch": 13, "label": "BB-" },
+    { "notch": 14, "label": "B+" },
+    { "notch": 15, "label": "B" },
+    { "notch": 16, "label": "B-" },
+    { "notch": 17, "label": "CCC+" },
+    { "notch": 18, "label": "CCC" },
+    { "notch": 19, "label": "CCC-" },
+    { "notch": 20, "label": "CC" },
+    { "notch": 21, "label": "C" },
+    { "notch": 22, "label": "D" }
+  ],
+  "rejectedLabels": ["", "aaa", " AAA", "AAA ", "AAAA", "A++", "AA--", "DD", "1", "Aaa", "Baa1"]
+}
