@@ -33,6 +33,26 @@ pub const fn meets_threshold(notch: u8, worst_allowed: u8) -> bool {
     notch <= worst_allowed
 }
 
+/// Довжина мітки на дроті. Найдовші мітки шкали — "CCC+" і "BBB-".
+pub const LABEL_LEN: usize = 4;
+
+/// Мітка в інструкції приходить фіксованим масивом, вирівняним ліворуч і
+/// добитим нулями: у Borsh це дешевше за String і не дає змінної довжини.
+pub fn notch_for_encoded_label(encoded: &[u8; LABEL_LEN]) -> Option<u8> {
+    let end = encoded
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(LABEL_LEN);
+
+    // Байти після нуля мусять бути нулями — інакше це не наше кодування, а
+    // сміття, яке не можна мовчки обрізати до валідної мітки.
+    if encoded[end..].iter().any(|byte| *byte != 0) {
+        return None;
+    }
+
+    notch_for_label(core::str::from_utf8(&encoded[..end]).ok()?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -72,6 +92,40 @@ mod tests {
             let label = entry.as_str().expect("мітка — рядок");
             assert_eq!(notch_for_label(label), None, "мітка {label:?}");
         }
+    }
+
+    fn encoded(label: &str) -> [u8; LABEL_LEN] {
+        let mut buffer = [0u8; LABEL_LEN];
+        buffer[..label.len()].copy_from_slice(label.as_bytes());
+        buffer
+    }
+
+    #[test]
+    fn every_fixture_label_survives_the_wire_encoding() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(SHARED_FIXTURE).expect("fixtures/scale.json — валідний JSON");
+
+        for entry in fixture["notches"].as_array().expect("notches — масив") {
+            let label = entry["label"].as_str().expect("label — рядок");
+            assert!(
+                label.len() <= LABEL_LEN,
+                "мітка {label} не влазить у LABEL_LEN"
+            );
+            assert_eq!(
+                notch_for_encoded_label(&encoded(label)),
+                notch_for_label(label),
+                "мітка {label}"
+            );
+        }
+    }
+
+    #[test]
+    fn encoded_labels_that_are_not_ours_are_rejected() {
+        assert_eq!(notch_for_encoded_label(&[0, 0, 0, 0]), None);
+        assert_eq!(notch_for_encoded_label(&encoded("AAAA")), None);
+        assert_eq!(notch_for_encoded_label(&[b'A', 0, b'A', 0]), None);
+        assert_eq!(notch_for_encoded_label(&[0xFF, 0, 0, 0]), None);
+        assert_eq!(notch_for_encoded_label(b" AAA"), None);
     }
 
     #[test]
