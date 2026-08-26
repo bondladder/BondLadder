@@ -1909,6 +1909,8 @@ dependencies = [
  "solana-address 2.6.1",
  "solana-instruction 3.4.1",
  "solana-instruction-error",
+ "solana-program-error 3.0.1",
+ "solana-program-option 3.1.0",
  "solana-program-pack 3.1.0",
  "spl-token-interface",
 ]
