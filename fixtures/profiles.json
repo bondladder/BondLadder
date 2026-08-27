@@ -1,0 +1,18 @@
+{
+  "rungMonths": [3, 6, 9, 12, 18],
+  "profiles": [
+    {
+      "profile": "conservative",
+      "worstAllowedLabel": "A-",
+      "worstAllowedNotch": 7,
+      "maxIssuerBps": 2000
+    },
+    {
+      "profile": "balanced",
+      "worstAllowedLabel": "BBB-",
+      "worstAllowedNotch": 10,
+      "maxIssuerBps": 4000
+    }
+  ],
+  "rejectedLabels": ["BB+", "D"]
+}

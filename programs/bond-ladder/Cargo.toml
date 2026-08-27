@@ -30,6 +30,8 @@ mock-issuer = { path = "../mock-issuer", features = ["cpi"] }
 
 
 [dev-dependencies]
+# Спільний фікстур профілів читається з тесту як JSON.
+serde_json = "1.0.151"
 # litesvm на Anchor 0.32.1 не збирається (E0027 на touched_flags) —
 # див. docs/PLAN.md, Complexity Tracking.
 mollusk-svm = "0.15.0"
