@@ -3,3 +3,4 @@
 // Наповнюється у Фазі 4 — кожен модуль разом зі своїми тестами.
 export * from './profiles'
 export * from './scale'
+export * from './schemas'

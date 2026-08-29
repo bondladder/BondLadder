@@ -13,7 +13,10 @@
     "test": "vitest run --passWithNoTests"
   },
   "devDependencies": {
-    "vitest": "^3.2.0",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
   }
 }

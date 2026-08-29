@@ -1,0 +1,109 @@
+{
+  "addresses": [
+    { "bytes": "0000000000000000000000000000000000000000000000000000000000000000", "address": "11111111111111111111111111111111" },
+    { "bytes": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "address": "JEKNVnkbo3jma5nREBBJCDoXFVeKkD56V3xKrvRmWxFG" },
+    { "bytes": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20", "address": "4wBqpZM9xaSheZzJSMawUKKwhdpChKbZ5eu5ky4Vigw" },
+    { "bytes": "00000100000000000000000000000000000000000000000000000000000000ff", "address": "11Cd4BX7vopdUjCBe56dfR9Mw86iDpdcAZbJ2yE8op" }
+  ],
+  "accounts": [
+    {
+      "case": "vault",
+      "account": "Vault",
+      "data": "d308e82b0298757707070707070707070707070707070707070707070707070707070707070707070000000000000000000000000000000000000000000000000000000000000000c8c358f50fea3edaeac936674a40d2393ca6cb137ccbbc9fa8e058cd382c8722c8d85b1964e99080631923a9c2a13e918454049b92ae1a9513894b2bb050dd1c3200c8000a0000e1f5050000000000e40b540200000000f9029500000000d20296490000000000fe",
+      "decoded": {
+        "admin": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "usdcMint": "11111111111111111111111111111111",
+        "ratingOracle": "EWhJjvNVb5mh1Jb9DTzvTwk7BeS9qdZdK7a6vdneQPa9",
+        "issuerProgram": "EX1tNj2MLTacJPfAVzbBW8ejFsnSp7AsnZvnRLmDy3vK",
+        "feeBps": 50,
+        "spreadCoefBps": 200,
+        "crankRewardBps": 10,
+        "minDeposit": "100000000",
+        "capacityUsdc": "10000000000",
+        "backstopFreeUsdc": "2500000000",
+        "backstopLockedValue": "1234567890",
+        "paused": false,
+        "bump": 254
+      }
+    },
+    {
+      "case": "vaultAtTheLimits",
+      "account": "Vault",
+      "data": "d308e82b0298757707070707070707070707070707070707070707070707070707070707070707070000000000000000000000000000000000000000000000000000000000000000c8c358f50fea3edaeac936674a40d2393ca6cb137ccbbc9fa8e058cd382c8722c8d85b1964e99080631923a9c2a13e918454049b92ae1a9513894b2bb050dd1cffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff01ff",
+      "decoded": {
+        "admin": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "usdcMint": "11111111111111111111111111111111",
+        "ratingOracle": "EWhJjvNVb5mh1Jb9DTzvTwk7BeS9qdZdK7a6vdneQPa9",
+        "issuerProgram": "EX1tNj2MLTacJPfAVzbBW8ejFsnSp7AsnZvnRLmDy3vK",
+        "feeBps": 65535,
+        "spreadCoefBps": 65535,
+        "crankRewardBps": 65535,
+        "minDeposit": "18446744073709551615",
+        "capacityUsdc": "18446744073709551615",
+        "backstopFreeUsdc": "18446744073709551615",
+        "backstopLockedValue": "18446744073709551615",
+        "paused": true,
+        "bump": 255
+      }
+    },
+    {
+      "case": "oracleConfig",
+      "account": "OracleConfig",
+      "data": "85c498321b1591fe07070707070707070707070707070707070707070707070707070707070707078051010000000000fd",
+      "decoded": {
+        "authority": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "maxAgeSecs": "86400",
+        "bump": 253
+      }
+    },
+    {
+      "case": "ratingRecord",
+      "account": "RatingRecord",
+      "data": "367c02c76a6cec3a090909090909090909090909090909090909090909090909090909090909090907014d4f4f445953000000939e6900000000fc",
+      "decoded": {
+        "instrumentMint": "cGfHiC6Kgg3FpFZvgwGcswsCRtp4aBP2fzuXRQPizuN",
+        "notch": 7,
+        "scaleVersion": 1,
+        "agencyCode": "MOODYS",
+        "updatedAt": "1772000000",
+        "bump": 252
+      }
+    },
+    {
+      "case": "ratingRecordBeforeTheEpoch",
+      "account": "RatingRecord",
+      "data": "367c02c76a6cec3a09090909090909090909090909090909090909090909090909090909090909090701464954434849424dfffffffffffffffffc",
+      "decoded": {
+        "instrumentMint": "cGfHiC6Kgg3FpFZvgwGcswsCRtp4aBP2fzuXRQPizuN",
+        "notch": 7,
+        "scaleVersion": 1,
+        "agencyCode": "FITCHIBM",
+        "updatedAt": "-1",
+        "bump": 252
+      }
+    },
+    {
+      "case": "issuerConfig",
+      "account": "IssuerConfig",
+      "data": "eef447ddfea9f7ed07070707070707070707070707070707070707070707070707070707070707070000000000000000000000000000000000000000000000000000000000000000fb",
+      "decoded": {
+        "authority": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "usdcMint": "11111111111111111111111111111111",
+        "bump": 251
+      }
+    },
+    {
+      "case": "instrument",
+      "account": "Instrument",
+      "data": "3b0e5c9273229b91090909090909090909090909090909090909090909090909090909090909090941434d452d4341504954414c00000000c074836a00000000a90140420f0000000000fa",
+      "decoded": {
+        "mint": "cGfHiC6Kgg3FpFZvgwGcswsCRtp4aBP2fzuXRQPizuN",
+        "issuerId": "ACME-CAPITAL",
+        "maturityTs": "1787000000",
+        "couponBps": 425,
+        "priceMicro": "1000000",
+        "bump": 250
+      }
+    }
+  ]
+}
