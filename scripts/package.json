@@ -8,8 +8,11 @@
     "test": "vitest run --passWithNoTests"
   },
   "devDependencies": {
-    "vitest": "^3.2.0",
+    "@types/node": "^22.10.0",
     "typescript": "^5.9.0",
-    "@types/node": "^22.10.0"
+    "vitest": "^3.2.0"
+  },
+  "dependencies": {
+    "@bondladder/shared": "workspace:^"
   }
 }
