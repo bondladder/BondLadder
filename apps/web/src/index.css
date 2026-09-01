@@ -19,34 +19,14 @@
 
     /* The single accent: ledger ink. Position marks and the floor rule only. */
     --mark: 224 58% 34%;
-    --mark-soft: 224 46% 88%;
 
     --oob: 32 14% 90%;
 
     --font-display: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
     --font-body: ui-sans-serif, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
 
-    /* shadcn surface tokens, retuned to paper */
-    --background: var(--paper);
-    --foreground: var(--ink);
-    --card: var(--paper);
-    --card-foreground: var(--ink);
-    --popover: var(--paper);
-    --popover-foreground: var(--ink);
-    --primary: var(--ink);
-    --primary-foreground: var(--paper);
-    --secondary: var(--paper-sunk);
-    --secondary-foreground: var(--ink);
-    --muted: var(--paper-sunk);
-    --muted-foreground: var(--ink-muted);
-    --accent: var(--paper-sunk);
-    --accent-foreground: var(--ink);
-    --destructive: 8 60% 40%;
-    --destructive-foreground: var(--paper);
+    /* Tailwind defaults an uncoloured border to currentColor; the reset below pins it. */
     --border: var(--rule);
-    --input: var(--rule);
-    --ring: var(--mark);
-    --radius: 0.125rem;
   }
 }
 
