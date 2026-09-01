@@ -1,0 +1,148 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* BondLadder — a paper register, not a dashboard.
+   All colours are HSL tokens. Light only; there is no dark theme. */
+
+@layer base {
+  :root {
+    --paper: 40 26% 97%;
+    --paper-sunk: 40 20% 94%;
+
+    --ink: 30 8% 12%;
+    --ink-muted: 30 6% 40%;
+    --ink-faint: 30 6% 58%;
+
+    --rule: 34 12% 82%;
+    --rule-strong: 32 10% 62%;
+
+    /* The single accent: ledger ink. Position marks and the floor rule only. */
+    --mark: 224 58% 34%;
+    --mark-soft: 224 46% 88%;
+
+    --oob: 32 14% 90%;
+
+    --font-display: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+    --font-body: ui-sans-serif, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+
+    /* shadcn surface tokens, retuned to paper */
+    --background: var(--paper);
+    --foreground: var(--ink);
+    --card: var(--paper);
+    --card-foreground: var(--ink);
+    --popover: var(--paper);
+    --popover-foreground: var(--ink);
+    --primary: var(--ink);
+    --primary-foreground: var(--paper);
+    --secondary: var(--paper-sunk);
+    --secondary-foreground: var(--ink);
+    --muted: var(--paper-sunk);
+    --muted-foreground: var(--ink-muted);
+    --accent: var(--paper-sunk);
+    --accent-foreground: var(--ink);
+    --destructive: 8 60% 40%;
+    --destructive-foreground: var(--paper);
+    --border: var(--rule);
+    --input: var(--rule);
+    --ring: var(--mark);
+    --radius: 0.125rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: hsl(var(--paper));
+    color: hsl(var(--ink));
+    font-family: var(--font-body);
+    font-feature-settings: 'kern' 1;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Every figure is tabular and lining. */
+  .figure {
+    font-variant-numeric: tabular-nums lining-nums;
+    font-feature-settings: 'tnum' 1, 'lnum' 1;
+  }
+
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  input[type='number'] {
+    -moz-appearance: textfield;
+  }
+}
+
+@layer components {
+  .section-heading {
+    font-family: var(--font-body);
+    font-size: 0.6875rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: hsl(var(--ink-muted));
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid hsl(var(--rule-strong));
+  }
+
+  .col-label {
+    font-size: 0.6875rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: hsl(var(--ink-faint));
+    font-weight: 400;
+  }
+
+  /* A plain paper slider, no rounded chrome. */
+  .paper-range {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 1.25rem;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .paper-range::-webkit-slider-runnable-track {
+    height: 1px;
+    background: hsl(var(--rule-strong));
+  }
+
+  .paper-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 0.75rem;
+    height: 0.75rem;
+    margin-top: -0.375rem;
+    background: hsl(var(--mark));
+    border: none;
+  }
+
+  .paper-range::-moz-range-track {
+    height: 1px;
+    background: hsl(var(--rule-strong));
+  }
+
+  .paper-range::-moz-range-thumb {
+    width: 0.75rem;
+    height: 0.75rem;
+    border: none;
+    border-radius: 0;
+    background: hsl(var(--mark));
+  }
+
+  .paper-range:focus-visible {
+    outline: 1px solid hsl(var(--mark));
+    outline-offset: 4px;
+  }
+}
