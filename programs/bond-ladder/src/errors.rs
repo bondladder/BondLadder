@@ -8,4 +8,6 @@ pub enum LadderError {
     InvalidDepositBounds,
     #[msg("Очікувалась адреса програми")]
     ExpectedProgram,
+    #[msg("Арифметика вийшла за межі розрядності")]
+    MathOverflow,
 }

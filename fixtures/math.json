@@ -1,0 +1,97 @@
+{
+  "secondsPerYear": "31557600",
+  "bpsDenominator": 10000,
+  "accrual": [
+    {
+      "case": "рік на 1000 USDC за оголошеною ставкою",
+      "valueMicro": "1000000000",
+      "feeBps": 50,
+      "elapsedSeconds": "31557600",
+      "expectedMicro": "5000000"
+    },
+    {
+      "case": "піврік бере рівно половину",
+      "valueMicro": "1000000000",
+      "feeBps": 50,
+      "elapsedSeconds": "15778800",
+      "expectedMicro": "2500000"
+    },
+    {
+      "case": "45 днів — рядок Statement у прототипі M0",
+      "valueMicro": "1000000000",
+      "feeBps": 50,
+      "elapsedSeconds": "3888000",
+      "expectedMicro": "616016"
+    },
+    {
+      "case": "93 дні — рядок Register у прототипі M0",
+      "valueMicro": "1000000000",
+      "feeBps": 50,
+      "elapsedSeconds": "8035200",
+      "expectedMicro": "1273100"
+    },
+    {
+      "case": "позиції ніхто не торкався",
+      "valueMicro": "1000000000",
+      "feeBps": 50,
+      "elapsedSeconds": "0",
+      "expectedMicro": "0"
+    },
+    {
+      "case": "порожня позиція не накопичує нічого і за сто років",
+      "valueMicro": "0",
+      "feeBps": 50,
+      "elapsedSeconds": "3155760000",
+      "expectedMicro": "0"
+    },
+    {
+      "case": "нульова ставка — теж ставка",
+      "valueMicro": "1000000000",
+      "feeBps": 0,
+      "elapsedSeconds": "31557600",
+      "expectedMicro": "0"
+    },
+    {
+      "case": "секунда на тисячі доларів коштує менше за мікро-USDC",
+      "valueMicro": "1000000000",
+      "feeBps": 50,
+      "elapsedSeconds": "1",
+      "expectedMicro": "0"
+    },
+    {
+      "case": "секунда на одному доларі — тим більше",
+      "valueMicro": "1000000",
+      "feeBps": 50,
+      "elapsedSeconds": "1",
+      "expectedMicro": "0"
+    },
+    {
+      "case": "сто відсотків за рік забирають позицію цілком",
+      "valueMicro": "1000000000",
+      "feeBps": 10000,
+      "elapsedSeconds": "31557600",
+      "expectedMicro": "1000000000"
+    },
+    {
+      "case": "десять років на місткості vault",
+      "valueMicro": "10000000000",
+      "feeBps": 50,
+      "elapsedSeconds": "315576000",
+      "expectedMicro": "500000000"
+    }
+  ],
+  "refused": [
+    {
+      "case": "добуток не вміщається в u128",
+      "valueMicro": "18446744073709551615",
+      "feeBps": 10000,
+      "elapsedSeconds": "18446744073709551615"
+    },
+    {
+      "case": "нарахування не вміщається в u64, хоча добуток вмістився в u128",
+      "valueMicro": "18446744073709551615",
+      "feeBps": 10000,
+      "elapsedSeconds": "31557600000000"
+    }
+  ]
+}
