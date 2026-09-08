@@ -26,16 +26,24 @@ interface CreditCurve {
   readonly agencyCode: string
   readonly couponBps: number
   readonly yieldBps: number
-  /// Зсув усієї кривої емітента. Різний у всіх — інакше на щаблі знайшлося б
-  /// два однакові строки, і «найближче погашення» з FR-006 стало б залежати
-  /// від порядку в масиві.
-  readonly driftDays: number
+  /// Зсув дати погашення для кожного щабля з RUNG_MONTHS, у тому самому
+  /// порядку. Зсув належить інструменту, а не кривій: один зсув на емітента
+  /// робив би «найближче погашення» з FR-006 однаковим порядком на всіх
+  /// п'яти щаблях, і підбір завжди брав би верхівку цього порядку до
+  /// вичерпання ліміту — поріг профілю не впливав би ні на що.
+  readonly maturityDriftDays: readonly number[]
 }
 
 // Емітенти вигадані. Шість проходять консервативний поріг — рівно стільки, щоб
 // п'ять щаблів дісталися п'ятьом різним емітентам за ліміту 2000 bps; два
 // відкриваються лише збалансованому профілю, і один не проходить за жодного,
 // щоб FR-005 було що відкинути.
+//
+// Зсуви розставлені так, що на кожному щаблі найближчий інструмент належить
+// іншому емітенту, а на щаблі 3 місяці найближчий — той самий BB+, який
+// відкидають обидва профілі. Кредитна якість і точність потрапляння в строк не
+// корелюють: інакше поріг профілю не змінював би розкладку, і FR-004 не було б
+// чим показати.
 const CREDIT_CURVES: readonly CreditCurve[] = [
   {
     issuerId: 'HELVETIA-RE',
@@ -43,7 +51,7 @@ const CREDIT_CURVES: readonly CreditCurve[] = [
     agencyCode: 'MOODYS',
     couponBps: 320,
     yieldBps: 335,
-    driftDays: -6,
+    maturityDriftDays: [-13, 15, 23, -9, 11],
   },
   {
     issuerId: 'NORDLYS-ENERGI',
@@ -51,7 +59,7 @@ const CREDIT_CURVES: readonly CreditCurve[] = [
     agencyCode: 'FITCH',
     couponBps: 365,
     yieldBps: 380,
-    driftDays: -3,
+    maturityDriftDays: [7, 6, 17, -21, 19],
   },
   {
     issuerId: 'KESTREL-RAIL',
@@ -59,7 +67,7 @@ const CREDIT_CURVES: readonly CreditCurve[] = [
     agencyCode: 'MOODYS',
     couponBps: 395,
     yieldBps: 415,
-    driftDays: 2,
+    maturityDriftDays: [2, 10, 12, 18, 26],
   },
   {
     issuerId: 'ATLAS-MARITIME',
@@ -67,7 +75,7 @@ const CREDIT_CURVES: readonly CreditCurve[] = [
     agencyCode: 'FITCH',
     couponBps: 460,
     yieldBps: 480,
-    driftDays: -9,
+    maturityDriftDays: [-18, -17, -25, 24, -8],
   },
   {
     issuerId: 'CALDERA-WATER',
@@ -75,7 +83,7 @@ const CREDIT_CURVES: readonly CreditCurve[] = [
     agencyCode: 'SPGLOBAL',
     couponBps: 430,
     yieldBps: 455,
-    driftDays: 5,
+    maturityDriftDays: [-9, -12, 4, -16, -30],
   },
   {
     issuerId: 'VERDANT-AGRI',
@@ -83,7 +91,7 @@ const CREDIT_CURVES: readonly CreditCurve[] = [
     agencyCode: 'SPGLOBAL',
     couponBps: 505,
     yieldBps: 530,
-    driftDays: 8,
+    maturityDriftDays: [16, 19, -20, -26, 3],
   },
   {
     issuerId: 'ORICON-LOGISTICS',
@@ -91,7 +99,7 @@ const CREDIT_CURVES: readonly CreditCurve[] = [
     agencyCode: 'MOODYS',
     couponBps: 610,
     yieldBps: 645,
-    driftDays: 11,
+    maturityDriftDays: [11, -8, -7, 5, -23],
   },
   {
     issuerId: 'SABLE-TEXTILES',
@@ -99,7 +107,7 @@ const CREDIT_CURVES: readonly CreditCurve[] = [
     agencyCode: 'FITCH',
     couponBps: 725,
     yieldBps: 770,
-    driftDays: -12,
+    maturityDriftDays: [-5, -3, -14, 13, -15],
   },
   {
     issuerId: 'RUBICON-LEISURE',
@@ -107,7 +115,7 @@ const CREDIT_CURVES: readonly CreditCurve[] = [
     agencyCode: 'SPGLOBAL',
     couponBps: 940,
     yieldBps: 1000,
-    driftDays: 14,
+    maturityDriftDays: [1, -22, 28, 29, 33],
   },
 ]
 
@@ -133,8 +141,13 @@ export function buildCatalog(referenceTs: bigint): readonly CatalogEntry[] {
   const catalog: CatalogEntry[] = []
 
   for (const curve of CREDIT_CURVES) {
-    for (const rungMonths of RUNG_MONTHS) {
-      const days = tenorDays(rungMonths, curve.driftDays)
+    for (const [index, rungMonths] of RUNG_MONTHS.entries()) {
+      const driftDays = curve.maturityDriftDays[index]
+      if (driftDays === undefined) {
+        throw new Error(`${curve.issuerId}: немає зсуву для щабля ${rungMonths} місяців`)
+      }
+
+      const days = tenorDays(rungMonths, driftDays)
 
       catalog.push({
         issuerId: curve.issuerId,

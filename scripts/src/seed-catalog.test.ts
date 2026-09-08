@@ -1,4 +1,4 @@
-import { RUNG_MONTHS, admitsRating, notchForLabel } from '@bondladder/shared'
+import { RUNG_MONTHS, admitsRating, notchForLabel, proposeLadder } from '@bondladder/shared'
 import { describe, expect, it } from 'vitest'
 import { type CatalogEntry, buildCatalog } from './seed-catalog'
 
@@ -17,6 +17,20 @@ function issuersAdmittedAt(rungMonths: number, profile: 'conservative' | 'balanc
   }
 
   return admitted
+}
+
+function nearestAt(rungMonths: number): CatalogEntry {
+  const targetTs = REFERENCE_TS + BigInt(Math.round((rungMonths * 365) / 12)) * 86_400n
+  const distance = (entry: CatalogEntry): bigint => {
+    const gap = entry.maturityTs - targetTs
+    return gap < 0n ? -gap : gap
+  }
+
+  return catalog
+    .filter((entry: CatalogEntry) => entry.rungMonths === rungMonths)
+    .reduce((best: CatalogEntry, entry: CatalogEntry) =>
+      distance(entry) < distance(best) ? entry : best,
+    )
 }
 
 function isPrintableAscii(text: string): boolean {
@@ -114,6 +128,25 @@ describe('каталог інструментів', () => {
     }
   })
 
+  // Поки зсув належав кривій, а не інструменту, «найближчий» був один і той
+  // самий на всіх щаблях, і підбір за FR-006 брав його, доки не впирався в
+  // ліміт. Профіль тоді не змінював розкладку — саме це й тримає цей тест.
+  it('не дає жодному емітенту бути найближчим до строку більш ніж на одному щаблі', () => {
+    const nearest = RUNG_MONTHS.map((rungMonths) => nearestAt(rungMonths).issuerId)
+
+    expect(new Set(nearest).size).toBe(RUNG_MONTHS.length)
+  })
+
+  // Інакше FR-005 нічого не відкидає на демо: відкинутий рейтинг має стояти
+  // там, де підбір без порога взяв би саме його.
+  it('ставить найближчим на першому щаблі інструмент, який відкидають обидва профілі', () => {
+    const firstRung = RUNG_MONTHS[0] as number
+    const notch = notchForLabel(nearestAt(firstRung).ratingLabel)
+
+    expect(notch).not.toBeNull()
+    expect(admitsRating('balanced', notch as number)).toBe(false)
+  })
+
   it('ставить строк тим далі, чим довший щабель', () => {
     for (const entry of catalog) {
       const longer = catalog.find(
@@ -140,6 +173,57 @@ describe('каталог інструментів', () => {
         expect(longer.priceMicro).toBeLessThan(entry.priceMicro)
       }
     }
+  })
+
+  // Каталог, на якому обидва профілі дають ту саму розкладку, не показує
+  // FR-004 нічим: різниця профілів має бути видима на демо, а не лише в
+  // допущеному наборі.
+  it('дає двом профілям різні лествиці й вищий купон збалансованому', () => {
+    const candidates = catalog.map((entry: CatalogEntry) => ({
+      ...entry,
+      notch: notchForLabel(entry.ratingLabel) ?? 0,
+    }))
+    const ladder = (profile: 'conservative' | 'balanced') => {
+      const proposal = proposeLadder({
+        profile,
+        depositMicro: 1_000_000_000n,
+        nowTs: REFERENCE_TS,
+        candidates,
+      })
+      if (!proposal.ok) {
+        throw new Error(`${profile}: ${proposal.reason}`)
+      }
+
+      return proposal.allocations.map((allocation) => allocation.candidate)
+    }
+
+    const conservative = ladder('conservative')
+    const balanced = ladder('balanced')
+
+    expect(conservative.map((entry) => entry.issuerId)).toEqual([
+      'KESTREL-RAIL',
+      'NORDLYS-ENERGI',
+      'CALDERA-WATER',
+      'HELVETIA-RE',
+      'VERDANT-AGRI',
+    ])
+    expect(balanced.map((entry) => entry.issuerId)).toEqual([
+      'KESTREL-RAIL',
+      'SABLE-TEXTILES',
+      'CALDERA-WATER',
+      'ORICON-LOGISTICS',
+      'VERDANT-AGRI',
+    ])
+
+    const coupon = (entries: readonly CatalogEntry[]) =>
+      entries.reduce((sum, entry) => sum + entry.couponBps, 0)
+
+    const belowConservativeFloor = balanced.filter(
+      (entry) => !admitsRating('conservative', notchForLabel(entry.ratingLabel) ?? 0),
+    )
+
+    expect(coupon(balanced)).toBeGreaterThan(coupon(conservative))
+    expect(belowConservativeFloor).toHaveLength(2)
   })
 
   it('повертає той самий каталог на той самий опорний час', () => {
