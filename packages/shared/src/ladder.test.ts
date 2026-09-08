@@ -6,6 +6,7 @@ import {
   issuerShareBps,
   proposeLadder,
   rungTargetTs,
+  rungWindow,
   splitDeposit,
 } from './ladder'
 import { RUNG_COUNT, RUNG_MONTHS, maxIssuerBps } from './profiles'
@@ -164,23 +165,49 @@ describe('підбір розкладки', () => {
     expect(issuersOf(proposal)).toEqual(NEAREST_ISSUERS)
   })
 
-  it('не бере інструмент, строк якого вже настав', () => {
-    const spare = ['PAPA', 'QUEBEC', 'ROMEO', 'TANGO'].flatMap((issuerId, index) =>
-      [6, 9, 12, 18].map((rungMonths) => candidate(issuerId, 'AAA', rungMonths, 5 + index)),
-    )
-    // Погашений стоїть до цілі щабля 3 місяці ближче (91 день), ніж будь-що
-    // інше в наборі: без відсіву він забрав би щабель саме за FR-006.
-    const matured = { ...candidate('MATURED', 'AAA', 3, 0), maturityTs: NOW }
-    const late = candidate('LATE', 'AAA', 3, 92)
+  it('пускає інструмент рівно на нижній межі допуску і не пускає на верхній', () => {
+    const window = rungWindow(NOW, 3)
+    const longer = SIX_ISSUERS.filter((entry) => entry.rungMonths !== 3)
+    const onEdge = (issuerId: string, maturityTs: bigint) => ({ issuerId, notch: 1, maturityTs })
 
     const proposal = proposeLadder({
       profile: 'conservative',
       depositMicro: DEPOSIT,
       nowTs: NOW,
-      candidates: [matured, late, ...spare],
+      candidates: [onEdge('UPPER', window.toTs), onEdge('LOWER', window.fromTs), ...longer],
     })
 
-    expect(issuersOf(proposal)[0]).toBe('LATE')
+    expect(issuersOf(proposal)[0]).toBe('LOWER')
+  })
+
+  it('відмовляє, коли єдині кандидати на щабель стоять поза допуском', () => {
+    const outOfWindow = SIX_ISSUERS.map((entry) =>
+      entry.rungMonths === 3 ? { ...entry, maturityTs: rungWindow(NOW, 3).toTs } : entry,
+    )
+
+    expect(
+      proposeLadder({
+        profile: 'conservative',
+        depositMicro: DEPOSIT,
+        nowTs: NOW,
+        candidates: outOfWindow,
+      }),
+    ).toEqual({ ok: false, reason: 'rung-unfilled', rungMonths: 3 })
+  })
+
+  it('не бере інструмент, строк якого вже настав', () => {
+    const matured = SIX_ISSUERS.map((entry) =>
+      entry.rungMonths === 3 ? { ...entry, maturityTs: NOW - DAY } : entry,
+    )
+
+    expect(
+      proposeLadder({
+        profile: 'conservative',
+        depositMicro: DEPOSIT,
+        nowTs: NOW,
+        candidates: matured,
+      }),
+    ).toEqual({ ok: false, reason: 'rung-unfilled', rungMonths: 3 })
   })
 
   it('різні профілі дають різну розкладку на тому самому каталозі', () => {
@@ -250,18 +277,28 @@ describe('підбір розкладки', () => {
         nowTs: NOW,
         candidates: curve('ZULU', 'BB+', [0, 0, 0, 0, 0]),
       }),
-    ).toEqual({ ok: false, reason: 'no-admitted-instruments' })
+    ).toEqual({ ok: false, reason: 'rung-unfilled', rungMonths: 3 })
   })
 
-  it('відмовляє, коли весь каталог уже погашений', () => {
-    expect(
+  // Допуск робить набори щаблів неперетинними, тож жадібний прохід уперся б у
+  // порожній щабель 18 місяців, хоч повна розкладка існує.
+  it('відступає, коли найближчий на короткому щаблі — єдиний кандидат на довгий', () => {
+    const spare = ['PAPA', 'QUEBEC', 'ROMEO', 'TANGO'].flatMap((issuerId, index) =>
+      [3, 6, 9, 12].map((rungMonths) => candidate(issuerId, 'AAA', rungMonths, 5 + index)),
+    )
+    const only = [candidate('XRAY', 'AAA', 3, 1), candidate('XRAY', 'AAA', 18, 1)]
+
+    const allocations = accept(
       proposeLadder({
-        profile: 'balanced',
+        profile: 'conservative',
         depositMicro: DEPOSIT,
         nowTs: NOW,
-        candidates: SIX_ISSUERS.map((entry) => ({ ...entry, maturityTs: NOW - DAY })),
+        candidates: [...only, ...spare],
       }),
-    ).toEqual({ ok: false, reason: 'no-admitted-instruments' })
+    )
+
+    expect(allocations[0]?.candidate.issuerId).toBe('PAPA')
+    expect(allocations[RUNG_COUNT - 1]?.candidate.issuerId).toBe('XRAY')
   })
 
   it('відмовляє на депозиті, меншому за кількість щаблів', () => {
@@ -286,5 +323,31 @@ describe('цільовий строк щабля', () => {
 
       expect(Number(days), `${rungMonths} міс`).toBe(Math.round((rungMonths * 365) / 12))
     }
+  })
+
+  // Допуск виводиться із сітки, тож окремого числа, яке можна розсинхронити з
+  // програмою, не існує.
+  it('ділить час без прогалин і без перекриття', () => {
+    const windows = RUNG_MONTHS.map((rungMonths) => rungWindow(NOW, rungMonths))
+
+    windows.forEach((window, index) => {
+      expect(window.fromTs).toBeLessThan(window.targetTs)
+      expect(window.targetTs).toBeLessThan(window.toTs)
+      expect(windows[index + 1]?.fromTs ?? window.toTs).toBe(window.toTs)
+    })
+  })
+
+  it('дає крайнім щаблям симетричний допуск', () => {
+    for (const rungMonths of [3, 18]) {
+      const window = rungWindow(NOW, rungMonths)
+
+      expect(window.targetTs - window.fromTs, `${rungMonths} міс`).toBe(
+        window.toTs - window.targetTs,
+      )
+    }
+  })
+
+  it('починається пізніше за момент депозиту, тож погашене не потрапляє в жодне вікно', () => {
+    expect(rungWindow(NOW, 3).fromTs).toBeGreaterThan(NOW)
   })
 })

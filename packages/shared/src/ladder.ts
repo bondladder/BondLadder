@@ -1,7 +1,7 @@
 // Підбір розкладки до підпису (FR-007): п'ять щаблів сітки, на кожному —
 // найближче до цільового строку погашення серед того, що пускає профіль
-// (FR-005, FR-006), і поділ депозиту рівними частками з неподільним залишком
-// у щабель 18 місяців (FR-032).
+// (FR-005) і що лежить у допуску щабля (FR-006), та поділ депозиту рівними
+// частками з неподільним залишком у щабель 18 місяців (FR-032).
 //
 // Пропозиція нічого не доводить: програма перевіряє кожне обмеження заново
 // (T020). Тут вона потрібна, щоб показати розкладку без симуляції транзакції.
@@ -26,6 +26,12 @@ export interface RungShare {
   readonly amountMicro: bigint
 }
 
+export interface RungWindow {
+  readonly targetTs: bigint
+  readonly fromTs: bigint
+  readonly toTs: bigint
+}
+
 export interface LadderAllocation<C extends LadderCandidate> extends RungShare {
   readonly candidate: C
 }
@@ -40,20 +46,44 @@ export interface LadderRequest<C extends LadderCandidate> {
 export type LadderProposal<C extends LadderCandidate> =
   | { readonly ok: true; readonly allocations: readonly LadderAllocation<C>[] }
   | { readonly ok: false; readonly reason: 'deposit-below-rung-count' }
-  | { readonly ok: false; readonly reason: 'no-admitted-instruments' }
+  | { readonly ok: false; readonly reason: 'rung-unfilled'; readonly rungMonths: number }
   | { readonly ok: false; readonly reason: 'issuer-limit' }
 
 const SECONDS_PER_DAY = 86_400n
 const DAYS_PER_YEAR = 365n
 const MONTHS_PER_YEAR = 12n
+const HALF = 2n
 
 // Ті самі дні, що й у каталозі: round(міс × 365 / 12), половина вгору. Місяць
 // однакової довжини тут доречніший за календарний — сітка строків є константою
 // протоколу, а не датою у чиємусь часовому поясі.
 export function rungTargetTs(nowTs: bigint, rungMonths: number): bigint {
-  const days = (BigInt(rungMonths) * DAYS_PER_YEAR + MONTHS_PER_YEAR / 2n) / MONTHS_PER_YEAR
+  const days = (BigInt(rungMonths) * DAYS_PER_YEAR + MONTHS_PER_YEAR / HALF) / MONTHS_PER_YEAR
 
   return nowTs + days * SECONDS_PER_DAY
+}
+
+// Допуск за FR-006 виводиться із сітки, а не задається окремим числом:
+// половина відстані до сусіднього щабля з кожного боку, у крайніх — до
+// єдиного сусіда. Верхня межа виключна, тож інструмент рівно на середині між
+// двома цілями належить коротшому щаблю і придатний рівно для одного.
+export function rungWindow(nowTs: bigint, rungMonths: number): RungWindow {
+  const index = RUNG_MONTHS.indexOf(rungMonths)
+  const previous = RUNG_MONTHS[index - 1]
+  const next = RUNG_MONTHS[index + 1]
+  const targetTs = rungTargetTs(nowTs, rungMonths)
+
+  const down =
+    previous === undefined ? undefined : (targetTs - rungTargetTs(nowTs, previous)) / HALF
+  const up = next === undefined ? undefined : (rungTargetTs(nowTs, next) - targetTs) / HALF
+
+  // Сітка коротша за два щаблі не існує (RUNG_MONTHS), тож нуль тут
+  // недосяжний — він лише закриває тип.
+  return {
+    targetTs,
+    fromTs: targetTs - (down ?? up ?? 0n),
+    toTs: targetTs + (up ?? down ?? 0n),
+  }
 }
 
 export function splitDeposit(depositMicro: bigint): readonly RungShare[] {
@@ -77,6 +107,10 @@ interface RankedCandidate<C extends LadderCandidate> {
   readonly distance: bigint
 }
 
+interface PreparedRung<C extends LadderCandidate> extends RungShare {
+  readonly ranked: readonly C[]
+}
+
 // Строк, потім емітент — щоб «найближче погашення» лишалось однією відповіддю
 // і не залежало від порядку кандидатів, у якому їх віддав RPC.
 function compareNearest<C extends LadderCandidate>(
@@ -96,13 +130,21 @@ function compareNearest<C extends LadderCandidate>(
   return 0
 }
 
-function rankByNearest<C extends LadderCandidate>(
-  pool: readonly C[],
-  targetTs: bigint,
+function rankForRung<C extends LadderCandidate>(
+  request: LadderRequest<C>,
+  rungMonths: number,
 ): readonly C[] {
-  return pool
+  const window = rungWindow(request.nowTs, rungMonths)
+
+  return request.candidates
+    .filter(
+      (candidate) =>
+        candidate.maturityTs >= window.fromTs &&
+        candidate.maturityTs < window.toTs &&
+        admitsRating(request.profile, candidate.notch),
+    )
     .map((candidate) => {
-      const gap = candidate.maturityTs - targetTs
+      const gap = candidate.maturityTs - window.targetTs
       return { candidate, distance: gap < 0n ? -gap : gap }
     })
     .sort(compareNearest)
@@ -112,7 +154,7 @@ function rankByNearest<C extends LadderCandidate>(
 export function proposeLadder<C extends LadderCandidate>(
   request: LadderRequest<C>,
 ): LadderProposal<C> {
-  const { profile, depositMicro, nowTs } = request
+  const { profile, depositMicro } = request
 
   // Менший депозит лишив би щаблі з нулем: це не лествиця, а відмова.
   // Справжній мінімум вкладу — параметр vault (FR-009), і його тримає програма.
@@ -120,36 +162,49 @@ export function proposeLadder<C extends LadderCandidate>(
     return { ok: false, reason: 'deposit-below-rung-count' }
   }
 
-  // Придатність не залежить від щабля: поріг рейтингу і ліміт на емітента
-  // однакові на всіх п'яти (FR-005), а сітка строків керує лише порядком.
-  // Тому пул один, а прохід щабель за щаблем не заганяє себе в глухий кут —
-  // доки хоч в одного емітента лишилась місткість, у нього є чим закрити
-  // будь-який щабель.
-  const pool = request.candidates.filter(
-    (candidate) => candidate.maturityTs > nowTs && admitsRating(profile, candidate.notch),
-  )
-  if (pool.length === 0) {
-    return { ok: false, reason: 'no-admitted-instruments' }
-  }
-
-  const held = new Map<string, bigint>()
-  const allocations: LadderAllocation<C>[] = []
-
+  const rungs: PreparedRung<C>[] = []
   for (const share of splitDeposit(depositMicro)) {
-    const candidate = rankByNearest(pool, rungTargetTs(nowTs, share.rungMonths)).find((entry) => {
-      const heldAfter = (held.get(entry.issuerId) ?? 0n) + share.amountMicro
-      return admitsIssuerShare(profile, issuerShareBps(heldAfter, depositMicro))
-    })
-
-    // Придатні інструменти є, але всі — в емітентів, які вже вибрали ліміт:
-    // часткова лествиця не пропонується (FR-006).
-    if (candidate === undefined) {
-      return { ok: false, reason: 'issuer-limit' }
+    const ranked = rankForRung(request, share.rungMonths)
+    if (ranked.length === 0) {
+      return { ok: false, reason: 'rung-unfilled', rungMonths: share.rungMonths }
     }
 
-    held.set(candidate.issuerId, (held.get(candidate.issuerId) ?? 0n) + share.amountMicro)
-    allocations.push({ ...share, candidate })
+    rungs.push({ ...share, ranked })
   }
 
-  return { ok: true, allocations }
+  // Допуск робить набори щаблів неперетинними, тож найближчий на короткому
+  // щаблі може виявитись єдиним придатним на довгому: жадібний прохід відмовив
+  // би там, де повний набір існує. Відкат по щаблях повертає першу розкладку у
+  // порядку «щабель за щаблем, найближче першим» — саме її і показуємо.
+  const fill = (
+    remaining: readonly PreparedRung<C>[],
+    held: Map<string, bigint>,
+  ): LadderAllocation<C>[] | null => {
+    const [rung, ...rest] = remaining
+    if (rung === undefined) {
+      return []
+    }
+
+    for (const candidate of rung.ranked) {
+      const heldBefore = held.get(candidate.issuerId) ?? 0n
+      const heldAfter = heldBefore + rung.amountMicro
+      if (!admitsIssuerShare(profile, issuerShareBps(heldAfter, depositMicro))) {
+        continue
+      }
+
+      held.set(candidate.issuerId, heldAfter)
+      const tail = fill(rest, held)
+      held.set(candidate.issuerId, heldBefore)
+
+      if (tail !== null) {
+        return [{ rungMonths: rung.rungMonths, amountMicro: rung.amountMicro, candidate }, ...tail]
+      }
+    }
+
+    return null
+  }
+
+  const allocations = fill(rungs, new Map())
+
+  return allocations === null ? { ok: false, reason: 'issuer-limit' } : { ok: true, allocations }
 }
