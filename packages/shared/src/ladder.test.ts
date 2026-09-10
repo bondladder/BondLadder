@@ -325,8 +325,20 @@ describe('цільовий строк щабля', () => {
     }
   })
 
-  // Допуск виводиться із сітки, тож окремого числа, яке можна розсинхронити з
-  // програмою, не існує.
+  // Допуск виводиться із сітки, тож окремого числа немає — але межі, які з
+  // неї вийшли, читає і programs/bond-ladder/src/selection.rs.
+  it('має ті самі межі, що й спільний фікстур', () => {
+    const referenceTs = BigInt(fixture.windowReferenceTs)
+
+    for (const entry of fixture.windows) {
+      const window = rungWindow(referenceTs, entry.rungMonths)
+
+      expect(window.targetTs.toString(), `${entry.rungMonths} міс`).toBe(entry.targetTs)
+      expect(window.fromTs.toString(), `${entry.rungMonths} міс`).toBe(entry.fromTs)
+      expect(window.toTs.toString(), `${entry.rungMonths} міс`).toBe(entry.toTs)
+    }
+  })
+
   it('ділить час без прогалин і без перекриття', () => {
     const windows = RUNG_MONTHS.map((rungMonths) => rungWindow(NOW, rungMonths))
 

@@ -10,4 +10,16 @@ pub enum LadderError {
     ExpectedProgram,
     #[msg("Арифметика вийшла за межі розрядності")]
     MathOverflow,
+    #[msg("Депозит має бути додатним")]
+    ZeroDeposit,
+    #[msg("Щабель не належить сітці строків протоколу")]
+    RungOutOfGrid,
+    #[msg("Рейтинг інструмента нижчий за поріг профілю")]
+    RatingBelowFloor,
+    #[msg("Дата погашення поза допуском щабля")]
+    MaturityOutsideWindow,
+    #[msg("Частка емітента перевищує ліміт профілю")]
+    IssuerLimitExceeded,
+    #[msg("Сума часток не дорівнює депозиту")]
+    AllocationSumMismatch,
 }

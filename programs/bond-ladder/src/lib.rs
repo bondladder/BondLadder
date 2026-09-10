@@ -4,6 +4,7 @@ pub mod errors;
 pub mod instructions;
 pub mod math;
 pub mod profiles;
+pub mod selection;
 pub mod state;
 
 use instructions::*;
