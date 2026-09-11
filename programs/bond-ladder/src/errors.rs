@@ -22,4 +22,8 @@ pub enum LadderError {
     IssuerLimitExceeded,
     #[msg("Сума часток не дорівнює депозиту")]
     AllocationSumMismatch,
+    #[msg("Маршрут ліквідності витратив більше за виданий бюджет")]
+    RouteOverspent,
+    #[msg("Маршрут ліквідності не видав жодної одиниці інструмента")]
+    RouteFilledNothing,
 }

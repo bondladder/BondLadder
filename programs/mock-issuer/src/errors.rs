@@ -6,4 +6,10 @@ pub enum IssuerError {
     InvalidPrice,
     #[msg("Дата погашення вже настала")]
     MaturityInThePast,
+    #[msg("Суми не вистачає навіть на одну одиницю інструмента")]
+    AmountBelowUnitPrice,
+    #[msg("Розрахунок ведеться лише в оголошеному USDC")]
+    WrongUsdcMint,
+    #[msg("Скарбниця має належати емітенту")]
+    TreasuryNotOwnedByIssuer,
 }

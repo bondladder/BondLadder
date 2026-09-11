@@ -19,6 +19,14 @@ pub struct Instrument {
     pub bump: u8,
 }
 
+/// Що маршрут ліквідності віддає покупцю (FR-021). Повертається з інструкції,
+/// тому vault читає результат обміну, а не перераховує арифметику емітента.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Fill {
+    pub units: u64,
+    pub spent_micro: u64,
+}
+
 impl IssuerConfig {
     pub const SEED: &'static [u8] = b"issuer";
 }

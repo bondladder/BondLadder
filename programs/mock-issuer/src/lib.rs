@@ -2,10 +2,12 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token};
 
 pub mod errors;
+pub mod instructions;
 pub mod state;
 
 use errors::IssuerError;
-use state::{Instrument, IssuerConfig};
+use instructions::*;
+use state::{Fill, Instrument, IssuerConfig};
 
 declare_id!("EX1tNj2MLTacJPfAVzbBW8ejFsnSp7AsnZvnRLmDy3vK");
 
@@ -55,6 +57,10 @@ pub mod mock_issuer {
         ctx.accounts.instrument.price_micro = price_micro;
 
         Ok(())
+    }
+
+    pub fn mint_for_usdc(ctx: Context<MintForUsdc>, amount_micro: u64) -> Result<Fill> {
+        instructions::mint_for_usdc::handler(ctx, amount_micro)
     }
 }
 

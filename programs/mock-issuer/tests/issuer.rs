@@ -8,7 +8,7 @@ use {
     solana_program_error::ProgramError,
     solana_program_option::COption,
     solana_program_pack::Pack,
-    spl_token_interface::state::Mint,
+    spl_token_interface::state::{Account as TokenAccount, AccountState, Mint},
     std::{path::Path, sync::Once},
 };
 
@@ -19,10 +19,20 @@ const USDC_MINT: Pubkey = Pubkey::new_from_array([7u8; 32]);
 const INSTRUMENT_MINT: Pubkey = Pubkey::new_from_array([9u8; 32]);
 const STRANGER: Pubkey = Pubkey::new_from_array([13u8; 32]);
 const AUTHORITY: Pubkey = Pubkey::new_from_array([42u8; 32]);
+const BUYER: Pubkey = Pubkey::new_from_array([21u8; 32]);
+const BUYER_USDC: Pubkey = Pubkey::new_from_array([22u8; 32]);
+const TREASURY: Pubkey = Pubkey::new_from_array([23u8; 32]);
+const BUYER_INSTRUMENT: Pubkey = Pubkey::new_from_array([24u8; 32]);
 const ISSUER_ID: [u8; 16] = *b"ACME-TREASURY-01";
+
+const PRICE_MICRO: u64 = 990_000;
+const BUYER_USDC_BALANCE: u64 = 1_000_000_000;
 
 const ERR_INVALID_PRICE: u32 = 6000;
 const ERR_MATURITY_IN_THE_PAST: u32 = 6001;
+const ERR_AMOUNT_BELOW_UNIT_PRICE: u32 = 6002;
+const ERR_WRONG_USDC_MINT: u32 = 6003;
+const ERR_TREASURY_NOT_OWNED_BY_ISSUER: u32 = 6004;
 const ERR_ANCHOR_HAS_ONE: u32 = 2001;
 
 fn program_id() -> Pubkey {
@@ -104,14 +114,43 @@ fn initialized_config() -> Account {
     })
 }
 
-fn registered_instrument(bump: u8) -> Account {
+fn instrument_maturing_at(bump: u8, maturity_ts: i64) -> Account {
     account_holding(&Instrument {
         mint: anchor_key(INSTRUMENT_MINT),
         issuer_id: ISSUER_ID,
-        maturity_ts: NOW + YEAR_SECS,
+        maturity_ts,
         coupon_bps: 425,
-        price_micro: 990_000,
+        price_micro: PRICE_MICRO,
         bump,
+    })
+}
+
+fn registered_instrument(bump: u8) -> Account {
+    instrument_maturing_at(bump, NOW + YEAR_SECS)
+}
+
+fn token_account(mint: Pubkey, owner: Pubkey, amount: u64) -> Account {
+    mollusk_svm_programs_token::token::create_account_for_token_account(TokenAccount {
+        mint,
+        owner,
+        amount,
+        delegate: COption::None,
+        state: AccountState::Initialized,
+        is_native: COption::None,
+        delegated_amount: 0,
+        close_authority: COption::None,
+    })
+}
+
+fn instrument_mint_account() -> Account {
+    let (config, _) = config_pda();
+
+    mollusk_svm_programs_token::token::create_account_for_mint(Mint {
+        mint_authority: COption::Some(config),
+        supply: 0,
+        decimals: 0,
+        is_initialized: true,
+        freeze_authority: COption::None,
     })
 }
 
@@ -183,6 +222,71 @@ fn register_accounts(mollusk: &Mollusk) -> Vec<(Pubkey, Account)> {
         keyed_account_for_system_program(),
         mollusk.sysvars.keyed_account_for_rent_sysvar(),
     ]
+}
+
+fn mint_for_usdc_ix(amount_micro: u64) -> Instruction {
+    let (config, _) = config_pda();
+    let (instrument, _) = instrument_pda(&INSTRUMENT_MINT);
+
+    Instruction::new_with_bytes(
+        program_id(),
+        &mock_issuer::instruction::MintForUsdc { amount_micro }.data(),
+        vec![
+            AccountMeta::new_readonly(config, false),
+            AccountMeta::new_readonly(instrument, false),
+            AccountMeta::new(INSTRUMENT_MINT, false),
+            AccountMeta::new(BUYER_USDC, false),
+            AccountMeta::new(TREASURY, false),
+            AccountMeta::new(BUYER_INSTRUMENT, false),
+            AccountMeta::new_readonly(BUYER, true),
+            AccountMeta::new_readonly(mollusk_svm_programs_token::token::ID, false),
+        ],
+    )
+}
+
+fn buy_accounts() -> Vec<(Pubkey, Account)> {
+    let (config, _) = config_pda();
+    let (instrument, bump) = instrument_pda(&INSTRUMENT_MINT);
+
+    vec![
+        (config, initialized_config()),
+        (instrument, registered_instrument(bump)),
+        (INSTRUMENT_MINT, instrument_mint_account()),
+        (
+            BUYER_USDC,
+            token_account(USDC_MINT, BUYER, BUYER_USDC_BALANCE),
+        ),
+        (TREASURY, token_account(USDC_MINT, config, 0)),
+        (BUYER_INSTRUMENT, token_account(INSTRUMENT_MINT, BUYER, 0)),
+        (BUYER, payer()),
+        mollusk_svm_programs_token::token::keyed_account(),
+    ]
+}
+
+fn replacing(key: Pubkey, account: Account) -> Vec<(Pubkey, Account)> {
+    let mut accounts = buy_accounts();
+    let slot = accounts
+        .iter_mut()
+        .find(|(existing, _)| *existing == key)
+        .expect("акаунт є у наборі");
+    slot.1 = account;
+
+    accounts
+}
+
+fn token_balance(result: &mollusk_svm::result::InstructionResult, key: &Pubkey) -> u64 {
+    let account = result.get_account(key).expect("токен-акаунт існує");
+
+    TokenAccount::unpack(&account.data)
+        .expect("токен-акаунт розпаковується")
+        .amount
+}
+
+fn fill_bytes(units: u64, spent_micro: u64) -> Vec<u8> {
+    let mut bytes = units.to_le_bytes().to_vec();
+    bytes.extend_from_slice(&spent_micro.to_le_bytes());
+
+    bytes
 }
 
 #[test]
@@ -311,4 +415,108 @@ fn set_price_moves_the_price_for_the_authority() {
         Instrument::try_deserialize(&mut stored.data.as_slice()).expect("інструмент декодується");
 
     assert_eq!(decoded.price_micro, 995_000);
+}
+
+#[test]
+fn mint_for_usdc_hands_over_units_and_keeps_the_indivisible_remainder_with_the_buyer() {
+    let mollusk = setup();
+    let units = BUYER_USDC_BALANCE / PRICE_MICRO;
+    let spent = units * PRICE_MICRO;
+
+    let result = mollusk.process_and_validate_instruction(
+        &mint_for_usdc_ix(BUYER_USDC_BALANCE),
+        &buy_accounts(),
+        &[
+            Check::success(),
+            Check::return_data(&fill_bytes(units, spent)),
+        ],
+    );
+
+    assert_eq!(
+        token_balance(&result, &BUYER_USDC),
+        BUYER_USDC_BALANCE - spent
+    );
+    assert_eq!(token_balance(&result, &TREASURY), spent);
+    assert_eq!(token_balance(&result, &BUYER_INSTRUMENT), units);
+
+    let minted = result.get_account(&INSTRUMENT_MINT).expect("мінт існує");
+    assert_eq!(
+        Mint::unpack(&minted.data)
+            .expect("мінт розпаковується")
+            .supply,
+        units
+    );
+}
+
+#[test]
+fn mint_for_usdc_leaves_nothing_behind_when_the_budget_divides_exactly() {
+    let mollusk = setup();
+    let budget = PRICE_MICRO * 3;
+
+    let result = mollusk.process_and_validate_instruction(
+        &mint_for_usdc_ix(budget),
+        &buy_accounts(),
+        &[Check::success(), Check::return_data(&fill_bytes(3, budget))],
+    );
+
+    assert_eq!(
+        token_balance(&result, &BUYER_USDC),
+        BUYER_USDC_BALANCE - budget
+    );
+}
+
+#[test]
+fn mint_for_usdc_refuses_a_budget_below_the_price_of_one_unit() {
+    let mollusk = setup();
+
+    mollusk.process_and_validate_instruction(
+        &mint_for_usdc_ix(PRICE_MICRO - 1),
+        &buy_accounts(),
+        &[Check::err(ProgramError::Custom(
+            ERR_AMOUNT_BELOW_UNIT_PRICE,
+        ))],
+    );
+}
+
+/// Викуп існує лише після дати погашення (FR-026), тож випуск — лише до неї:
+/// інакше емітент продавав би те, що покупець тієї ж миті пред’явить назад.
+#[test]
+fn mint_for_usdc_refuses_an_instrument_that_has_already_matured() {
+    let mollusk = setup();
+    let (instrument, bump) = instrument_pda(&INSTRUMENT_MINT);
+
+    mollusk.process_and_validate_instruction(
+        &mint_for_usdc_ix(BUYER_USDC_BALANCE),
+        &replacing(instrument, instrument_maturing_at(bump, NOW)),
+        &[Check::err(ProgramError::Custom(ERR_MATURITY_IN_THE_PAST))],
+    );
+}
+
+#[test]
+fn mint_for_usdc_refuses_payment_in_anything_but_usdc() {
+    let mollusk = setup();
+
+    mollusk.process_and_validate_instruction(
+        &mint_for_usdc_ix(BUYER_USDC_BALANCE),
+        &replacing(
+            BUYER_USDC,
+            token_account(INSTRUMENT_MINT, BUYER, BUYER_USDC_BALANCE),
+        ),
+        &[Check::err(ProgramError::Custom(ERR_WRONG_USDC_MINT))],
+    );
+}
+
+/// Без цієї перевірки покупець вказав би власний рахунок як скарбницю і
+/// отримав би інструмент даром: SPL переказ сам по собі її не робить.
+#[test]
+fn mint_for_usdc_refuses_a_treasury_the_issuer_does_not_own() {
+    let mollusk = setup();
+
+    mollusk.process_and_validate_instruction(
+        &mint_for_usdc_ix(BUYER_USDC_BALANCE),
+        &replacing(TREASURY, token_account(USDC_MINT, BUYER, 0)),
+        &[Check::err(ProgramError::Custom(
+            ERR_TREASURY_NOT_OWNED_BY_ISSUER,
+        ))],
+    );
 }
