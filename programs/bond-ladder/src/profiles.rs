@@ -1,5 +1,6 @@
 //! Пороги профілів (FR-004) і сітка строків лествиці (FR-006).
 
+use anchor_lang::prelude::*;
 use rating_oracle::scale;
 
 /// Сітка строків до профілю не належить: профіль впливає на кредитну якість,
@@ -8,13 +9,23 @@ pub const RUNG_MONTHS: [u8; 5] = [3, 6, 9, 12, 18];
 
 pub const RUNG_COUNT: usize = RUNG_MONTHS.len();
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RiskProfile {
     Conservative,
     Balanced,
 }
 
 impl RiskProfile {
+    /// Байт профілю в сіді позиції виписаний, а не взятий приведенням: сід —
+    /// частина адреси, і перестановка варіантів не має мовчки переносити чужі
+    /// позиції на нову адресу.
+    pub const fn seed_byte(self) -> u8 {
+        match self {
+            Self::Conservative => 0,
+            Self::Balanced => 1,
+        }
+    }
+
     pub const fn worst_allowed_notch(self) -> u8 {
         match self {
             Self::Conservative => 7,

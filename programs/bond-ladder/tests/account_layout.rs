@@ -92,6 +92,7 @@ fn vault(decoded: &Value) -> Vault {
         crank_reward_bps: small(&decoded["crankRewardBps"]),
         min_deposit: wide(&decoded["minDeposit"]),
         capacity_usdc: wide(&decoded["capacityUsdc"]),
+        total_principal_usdc: wide(&decoded["totalPrincipalUsdc"]),
         backstop_free_usdc: wide(&decoded["backstopFreeUsdc"]),
         backstop_locked_value: wide(&decoded["backstopLockedValue"]),
         paused: flag(&decoded["paused"]),

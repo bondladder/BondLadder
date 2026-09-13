@@ -3,6 +3,7 @@
 use anchor_lang::prelude::*;
 
 use crate::errors::LadderError;
+use crate::profiles::RUNG_COUNT;
 use crate::state::BPS_DENOMINATOR;
 
 /// Юліанський рік. Календарний рік дав би комісію, що стрибає у високосний
@@ -21,6 +22,21 @@ pub fn accrue_fee(value_micro: u64, fee_bps: u16, elapsed_seconds: u64) -> Resul
         .ok_or_else(|| error!(LadderError::MathOverflow))?;
 
     u64::try_from(numerator / DENOMINATOR).map_err(|_| error!(LadderError::MathOverflow))
+}
+
+/// Депозит ділиться на п'ять рівних часток, а неподільний залишок додається до
+/// щабля 18 місяців (FR-032). Рахує це програма, а не клієнт: `verify_proposal`
+/// звіряє лише суму часток, тож рівність між собою тримається саме тут.
+pub fn split_deposit(deposit_micro: u64) -> Result<[u64; RUNG_COUNT]> {
+    require!(deposit_micro > 0, LadderError::ZeroDeposit);
+
+    let share = deposit_micro / RUNG_COUNT as u64;
+    let mut amounts = [share; RUNG_COUNT];
+    // share × 4 ≤ deposit за побудовою, тож ані множення, ані віднімання за
+    // u64 вийти не можуть — переповненню тут просто немає звідки взятись.
+    amounts[RUNG_COUNT - 1] = deposit_micro - share * (RUNG_COUNT as u64 - 1);
+
+    Ok(amounts)
 }
 
 #[cfg(test)]
@@ -56,11 +72,126 @@ mod tests {
         entry["case"].as_str().expect("case — рядок")
     }
 
-    fn error_code(result: Result<u64>) -> u32 {
+    fn error_code<T: std::fmt::Debug>(result: Result<T>) -> u32 {
         match result.expect_err("очікувалась помилка") {
             Error::AnchorError(err) => err.error_code_number,
             Error::ProgramError(_) => panic!("очікувалась іменована помилка"),
         }
+    }
+
+    /// Той самий поділ рахує packages/shared/src/ladder.ts: клієнт показує
+    /// частки до підпису, програма рахує їх заново і від клієнта не бере.
+    const LADDER_FIXTURE: &str = include_str!("../../../fixtures/ladder.json");
+
+    fn ladder_fixture() -> serde_json::Value {
+        serde_json::from_str(LADDER_FIXTURE).expect("fixtures/ladder.json — валідний JSON")
+    }
+
+    /// Детермінований xorshift: набір депозитів має бути однаковий на кожному
+    /// прогоні, інакше червоний тест не відтворюється.
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            let mut state = self.0;
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            self.0 = state;
+            state.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        }
+
+        fn between(&mut self, from: u64, to: u64) -> u64 {
+            from + self.next() % (to - from)
+        }
+    }
+
+    #[test]
+    fn the_split_matches_the_shared_fixture() {
+        let fixture = ladder_fixture();
+        let cases = fixture["split"].as_array().expect("split — масив");
+        assert!(!cases.is_empty());
+
+        for entry in cases {
+            let expected: Vec<u64> = entry["amountsMicro"]
+                .as_array()
+                .expect("amountsMicro — масив")
+                .iter()
+                .map(wide)
+                .collect();
+
+            let split =
+                split_deposit(wide(&entry["depositMicro"])).expect("випадок фікстури ділиться");
+
+            assert_eq!(split.to_vec(), expected, "{}", case_name(entry));
+        }
+    }
+
+    #[test]
+    fn a_deposit_of_nothing_has_nothing_to_split() {
+        assert_eq!(
+            error_code(split_deposit(0)),
+            u32::from(LadderError::ZeroDeposit)
+        );
+    }
+
+    /// SC-005, обидві умови. Перша: п'ять часток дають депозит точно. Друга:
+    /// витрачене на щаблях плюс неподільна решта, що лишається власнику, теж
+    /// дає депозит точно — жодного мікро-USDC поза обліком.
+    #[test]
+    fn no_micro_usdc_escapes_accounting_on_a_thousand_deposits() {
+        let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+
+        for deposit in 0..1_000u64 {
+            let deposit_micro = rng.between(100_000_000, 50_000_000_000);
+            let split = split_deposit(deposit_micro).expect("депозит ділиться");
+
+            assert_eq!(
+                split.iter().sum::<u64>(),
+                deposit_micro,
+                "депозит {deposit}: частки не дають депозиту"
+            );
+
+            let mut spent_total = 0u64;
+            let mut left_total = 0u64;
+            let mut units_value = 0u64;
+            let mut price_total = 0u64;
+
+            for share in split {
+                let price_micro = rng.between(900_000, 1_050_000);
+                let spent_micro = share - share % price_micro;
+
+                spent_total += spent_micro;
+                left_total += share - spent_micro;
+                units_value += (spent_micro / price_micro) * price_micro;
+                price_total += price_micro;
+            }
+
+            assert_eq!(
+                spent_total + left_total,
+                deposit_micro,
+                "депозит {deposit}: витрачене і решта не дають депозиту"
+            );
+            assert_eq!(
+                units_value, spent_total,
+                "депозит {deposit}: одиниці не покривають витраченого"
+            );
+            assert!(
+                left_total < price_total,
+                "депозит {deposit}: решта доросла до цілої одиниці"
+            );
+        }
+    }
+
+    /// Неподільний залишок іде у щабель 18 місяців, а не в перший (FR-032).
+    #[test]
+    fn the_indivisible_remainder_lands_on_the_longest_rung() {
+        let split = split_deposit(1_000_000_003).expect("депозит ділиться");
+
+        for shorter in &split[..RUNG_COUNT - 1] {
+            assert_eq!(*shorter, split[0]);
+        }
+        assert_eq!(split[RUNG_COUNT - 1], split[0] + 3);
     }
 
     #[test]

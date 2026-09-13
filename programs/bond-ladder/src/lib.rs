@@ -9,6 +9,7 @@ pub mod selection;
 pub mod state;
 
 use instructions::*;
+use profiles::RiskProfile;
 use state::VaultParams;
 
 declare_id!("5aKvW5hFUGw5hKzpz5DRYBK26EADqRHHgknmCU1EGNHe");
@@ -30,5 +31,15 @@ pub mod bond_ladder {
 
     pub fn set_paused(ctx: Context<SetPaused>, paused: bool) -> Result<()> {
         instructions::set_config::set_paused(ctx, paused)
+    }
+
+    /// Пропозиція з п'яти інструментів передається у `remaining_accounts`
+    /// четвірками: інструмент, рейтинг, мінт, кастодія vault.
+    pub fn open_ladder<'info>(
+        ctx: Context<'_, '_, '_, 'info, OpenLadder<'info>>,
+        profile: RiskProfile,
+        deposit_micro: u64,
+    ) -> Result<()> {
+        instructions::open_ladder::open_ladder(ctx, profile, deposit_micro)
     }
 }

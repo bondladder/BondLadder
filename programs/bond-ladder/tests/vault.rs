@@ -115,6 +115,7 @@ fn initialized_vault() -> Account {
         crank_reward_bps: cfg.crank_reward_bps,
         min_deposit: cfg.min_deposit,
         capacity_usdc: cfg.capacity_usdc,
+        total_principal_usdc: 0,
         backstop_free_usdc: 0,
         backstop_locked_value: 0,
         paused: false,
@@ -209,6 +210,7 @@ fn initialize_vault_records_the_configuration_and_starts_unpaused() {
     assert_eq!(decoded.crank_reward_bps, 10);
     assert_eq!(decoded.min_deposit, 100_000_000);
     assert_eq!(decoded.capacity_usdc, 10_000_000_000);
+    assert_eq!(decoded.total_principal_usdc, 0);
     assert_eq!(decoded.backstop_free_usdc, 0);
     assert_eq!(decoded.backstop_locked_value, 0);
     assert!(!decoded.paused);

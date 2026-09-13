@@ -26,4 +26,22 @@ pub enum LadderError {
     RouteOverspent,
     #[msg("Маршрут ліквідності не видав жодної одиниці інструмента")]
     RouteFilledNothing,
+    #[msg("Vault на паузі: нові депозити не приймаються")]
+    VaultPaused,
+    #[msg("Депозит менший за мінімальний для цього vault")]
+    DepositBelowMinimum,
+    #[msg("Депозит не вміщається в місткість vault")]
+    VaultCapacityExceeded,
+    #[msg("Розрахунок ведеться лише в оголошеному USDC")]
+    WrongUsdcMint,
+    #[msg("Рейтинг відсутній, застарілий або з іншої версії шкали")]
+    RatingUnusable,
+    #[msg("Рейтинг опублікований не для цього інструмента")]
+    RatingMintMismatch,
+    #[msg("Акаунт належить не тій програмі, яку налаштовано у vault")]
+    ForeignAccountOwner,
+    #[msg("Очікувалось по чотири акаунти на кожен із п'яти щаблів")]
+    MissingRungAccounts,
+    #[msg("Куплені інструменти мають лягати в кастодію vault")]
+    CustodyNotOwnedByVault,
 }

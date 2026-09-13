@@ -173,6 +173,7 @@ export const vaultSchema = z.strictObject({
   crankRewardBps: u16Schema,
   minDeposit: u64Schema,
   capacityUsdc: u64Schema,
+  totalPrincipalUsdc: u64Schema,
   backstopFreeUsdc: u64Schema,
   backstopLockedValue: u64Schema,
   paused: z.boolean(),
@@ -217,7 +218,7 @@ export type Instrument = z.infer<typeof instrumentSchema>
 
 const VAULT = {
   discriminator: [0xd3, 0x08, 0xe8, 0x2b, 0x02, 0x98, 0x75, 0x77],
-  size: DISCRIMINATOR_LENGTH + 4 * ADDRESS_LENGTH + 3 * 2 + 4 * 8 + 1 + 1,
+  size: DISCRIMINATOR_LENGTH + 4 * ADDRESS_LENGTH + 3 * 2 + 5 * 8 + 1 + 1,
 } as const
 
 const ORACLE_CONFIG = {
@@ -255,6 +256,7 @@ export function decodeVault(data: Uint8Array): Vault {
     crankRewardBps: reader.u16(),
     minDeposit: reader.u64(),
     capacityUsdc: reader.u64(),
+    totalPrincipalUsdc: reader.u64(),
     backstopFreeUsdc: reader.u64(),
     backstopLockedValue: reader.u64(),
     paused: reader.bool(),

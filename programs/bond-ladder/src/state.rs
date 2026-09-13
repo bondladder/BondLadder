@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::errors::LadderError;
+use crate::profiles::{RiskProfile, RUNG_COUNT};
 
 pub const BPS_DENOMINATOR: u16 = 10_000;
 
@@ -16,6 +17,7 @@ pub struct Vault {
     pub crank_reward_bps: u16,
     pub min_deposit: u64,
     pub capacity_usdc: u64,
+    pub total_principal_usdc: u64,
     pub backstop_free_usdc: u64,
     pub backstop_locked_value: u64,
     pub paused: bool,
@@ -24,6 +26,44 @@ pub struct Vault {
 
 impl Vault {
     pub const SEED: &'static [u8] = b"vault";
+}
+
+/// Один щабель лествиці: скільки одиниць інструмента лежить у кастодії vault
+/// і за яких умов вони туди потрапили. Ціна і рейтинг записані на момент
+/// входу (FR-022) — пізніші зміни їх не переписують.
+#[derive(
+    AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Debug, Default, PartialEq, Eq,
+)]
+pub struct Rung {
+    pub target_months: u8,
+    pub instrument: Pubkey,
+    pub amount: u64,
+    pub entry_price_micro: u64,
+    pub entry_notch: u8,
+    pub maturity_ts: i64,
+    pub flagged: bool,
+}
+
+/// Позиція користувача (FR-010): запис, закріплений за гаманцем, а не
+/// переносимий токен. Кастодія інструментів пулова, тож саме цей запис і є
+/// персональним обліком.
+#[account]
+#[derive(InitSpace)]
+pub struct Position {
+    pub owner: Pubkey,
+    pub profile: RiskProfile,
+    pub rungs: [Rung; RUNG_COUNT],
+    /// Фактично вкладене, а не внесене: неподільна решта депозиту лишається
+    /// власнику і в позицію не потрапляє (FR-032).
+    pub principal_usdc: u64,
+    pub fee_accrued: u64,
+    pub last_fee_ts: i64,
+    pub opened_at: i64,
+    pub bump: u8,
+}
+
+impl Position {
+    pub const SEED: &'static [u8] = b"position";
 }
 
 /// Налаштування, з якими vault створюється. Окремою структурою, бо межі

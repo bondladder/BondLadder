@@ -17,6 +17,7 @@ pub fn handler(ctx: Context<InitializeVault>, params: VaultParams) -> Result<()>
     vault.crank_reward_bps = params.crank_reward_bps;
     vault.min_deposit = params.min_deposit;
     vault.capacity_usdc = params.capacity_usdc;
+    vault.total_principal_usdc = 0;
     vault.backstop_free_usdc = 0;
     vault.backstop_locked_value = 0;
     vault.paused = false;
