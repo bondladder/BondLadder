@@ -3,8 +3,13 @@
 //! решта не списується з гаманця власника взагалі.
 
 use {
-    anchor_lang::{AccountDeserialize, AccountSerialize, InstructionData, Space},
+    anchor_lang::{
+        AccountDeserialize, AccountSerialize, AnchorDeserialize, Discriminator, InstructionData,
+        Space,
+    },
+    base64::{prelude::BASE64_STANDARD, Engine},
     bond_ladder::{
+        events::LadderOpened,
         profiles::{RiskProfile, RUNG_COUNT, RUNG_MONTHS},
         state::{Position, Vault, VaultParams},
     },
@@ -26,8 +31,9 @@ use {
     solana_program_error::ProgramError,
     solana_program_option::COption,
     solana_program_pack::Pack,
+    solana_svm_log_collector::LogCollector,
     spl_token_interface::state::{Account as SplTokenAccount, AccountState, Mint},
-    std::{path::Path, sync::Once},
+    std::{cell::RefCell, path::Path, rc::Rc, sync::Once},
 };
 
 const NOW: i64 = 1_800_000_000;
@@ -147,6 +153,30 @@ fn setup() -> Mollusk {
     mollusk_svm_programs_token::token::add_program(&mut mollusk);
     mollusk.sysvars.clock.unix_timestamp = NOW;
     mollusk
+}
+
+/// Подія Anchor живе тільки в логах, тож логер вішається явно і без ліміту:
+/// обрізаний лог не відрізнити від невідправленої події.
+fn setup_with_logs() -> (Mollusk, Rc<RefCell<LogCollector>>) {
+    let logs = LogCollector::new_ref_with_limit(None);
+    let mut mollusk = setup();
+    mollusk.logger = Some(Rc::clone(&logs));
+
+    (mollusk, logs)
+}
+
+fn ladder_opened_events(logs: &Rc<RefCell<LogCollector>>) -> Vec<LadderOpened> {
+    logs.borrow()
+        .get_recorded_content()
+        .iter()
+        .filter_map(|line| line.strip_prefix("Program data: "))
+        .filter_map(|encoded| BASE64_STANDARD.decode(encoded).ok())
+        .filter(|bytes| bytes.starts_with(LadderOpened::DISCRIMINATOR))
+        .map(|bytes| {
+            LadderOpened::try_from_slice(&bytes[LadderOpened::DISCRIMINATOR.len()..])
+                .expect("подія розбирається")
+        })
+        .collect()
 }
 
 fn payer() -> Account {
@@ -562,5 +592,100 @@ fn open_ladder_refuses_a_maturity_outside_the_rung_window() {
         &[Check::err(ProgramError::Custom(
             ERR_MATURITY_OUTSIDE_WINDOW,
         ))],
+    );
+}
+
+#[test]
+fn open_ladder_emits_an_event_that_reconstructs_the_position() {
+    let (mollusk, logs) = setup_with_logs();
+    let profile = RiskProfile::Conservative;
+    let (position, _) = position_pda(profile);
+
+    let result = mollusk.process_and_validate_instruction(
+        &open_ladder_ix(profile, DEPOSIT),
+        &open_accounts(profile),
+        &[Check::success()],
+    );
+
+    let stored = result.get_account(&position).expect("позицію створено");
+    let decoded = Position::try_deserialize(&mut stored.data.as_slice()).expect("позиція");
+
+    let events = ladder_opened_events(&logs);
+    let [event] = events.as_slice() else {
+        panic!("очікувалась рівно одна подія, а не {}", events.len());
+    };
+
+    assert_eq!(event.owner, decoded.owner);
+    assert_eq!(event.profile, decoded.profile);
+    assert_eq!(event.deposit_micro, DEPOSIT);
+    assert_eq!(event.principal_usdc, decoded.principal_usdc);
+    assert_eq!(event.rungs, decoded.rungs);
+    assert_eq!(event.opened_at, decoded.opened_at);
+
+    // Внесене і вкладене різняться на неподільну решту (FR-032): читач логів
+    // має бачити обидва, інакше здача виглядає як загублені кошти.
+    assert!(
+        event.principal_usdc < event.deposit_micro,
+        "решта має бути неподільною, а не нулем"
+    );
+}
+
+/// Рейтинг і ціна пишуться по кожному щаблю окремо (FR-022): один нотч на всю
+/// лествицю приховав би найгірший інструмент у ній.
+#[test]
+fn the_event_carries_the_rating_and_price_of_every_rung_on_its_own() {
+    let (mollusk, logs) = setup_with_logs();
+    let profile = RiskProfile::Conservative;
+    let notches = [1u8, 7, 4, 2, 6];
+
+    let mut accounts = open_accounts(profile);
+    for (index, notch) in notches.iter().enumerate() {
+        let rating = rating_pda(index).0;
+        let slot = accounts
+            .iter_mut()
+            .find(|(key, _)| *key == rating)
+            .expect("рейтинг є у наборі");
+        slot.1 = rating_account(index, *notch, NOW);
+    }
+
+    mollusk.process_and_validate_instruction(
+        &open_ladder_ix(profile, DEPOSIT),
+        &accounts,
+        &[Check::success()],
+    );
+
+    let events = ladder_opened_events(&logs);
+    let [event] = events.as_slice() else {
+        panic!("очікувалась рівно одна подія, а не {}", events.len());
+    };
+
+    for index in 0..RUNG_COUNT {
+        let rung = event.rungs[index];
+
+        assert_eq!(rung.entry_notch, notches[index], "щабель {index}");
+        assert_eq!(rung.entry_price_micro, PRICES[index], "щабель {index}");
+        assert_eq!(
+            rung.instrument,
+            anchor_key(instrument_mint(index)),
+            "щабель {index}"
+        );
+    }
+}
+
+#[test]
+fn a_refused_deposit_emits_no_event() {
+    let (mollusk, logs) = setup_with_logs();
+    let profile = RiskProfile::Conservative;
+    let (vault, _) = vault_pda();
+
+    mollusk.process_and_validate_instruction(
+        &open_ladder_ix(profile, DEPOSIT),
+        &replacing(profile, vault, vault_account(true, 0)),
+        &[Check::err(ProgramError::Custom(ERR_VAULT_PAUSED))],
+    );
+
+    assert!(
+        ladder_opened_events(&logs).is_empty(),
+        "відмова не має лишати сліду про відкриту лествицю"
     );
 }

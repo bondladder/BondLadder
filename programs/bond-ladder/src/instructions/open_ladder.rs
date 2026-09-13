@@ -4,6 +4,7 @@ use mock_issuer::state::Instrument;
 use rating_oracle::state::{OracleConfig, RatingRecord};
 
 use crate::errors::LadderError;
+use crate::events::LadderOpened;
 use crate::math;
 use crate::profiles::{RiskProfile, RUNG_COUNT, RUNG_MONTHS};
 use crate::route::{self, Venue};
@@ -165,6 +166,15 @@ pub fn open_ladder<'info>(
         .total_principal_usdc
         .checked_add(principal_usdc)
         .ok_or_else(|| error!(LadderError::MathOverflow))?;
+
+    emit!(LadderOpened {
+        owner: ctx.accounts.owner.key(),
+        profile,
+        deposit_micro,
+        principal_usdc,
+        rungs,
+        opened_at: now_ts,
+    });
 
     Ok(())
 }
