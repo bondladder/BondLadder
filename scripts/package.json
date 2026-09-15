@@ -5,14 +5,19 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "deploy:devnet": "tsx src/deploy.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "tsx": "^4.23.12",
     "typescript": "^5.9.0",
     "vitest": "^3.2.0"
   },
   "dependencies": {
-    "@bondladder/shared": "workspace:^"
+    "@bondladder/shared": "workspace:^",
+    "@coral-xyz/anchor": "^0.32.1",
+    "@solana/spl-token": "^0.4.15",
+    "@solana/web3.js": "^1.98.4"
   }
 }
