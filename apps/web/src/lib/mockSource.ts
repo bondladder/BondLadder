@@ -9,6 +9,18 @@
  * No network, no wallet, no chain. Illustrative figures only.
  */
 
+import type {
+    Bond,
+    HeldRow,
+    Issuer,
+    Profile,
+    ProfileKey,
+    RedemptionQuote,
+    RegisterEntry,
+    Sheet,
+    TermKey,
+} from './source';
+
 /* ------------------------------------------------------------------ */
 /* Rating scale                                                        */
 /* ------------------------------------------------------------------ */
@@ -58,8 +70,6 @@ export function weightedGradeLabel(average: number): string {
 /* Maturity points                                                     */
 /* ------------------------------------------------------------------ */
 
-export type TermKey = 'm3' | 'm6' | 'm9' | 'm12' | 'm18';
-
 export interface Term {
     key: TermKey;
     label: string;
@@ -76,14 +86,6 @@ export const TERMS: Term[] = [
 /* ------------------------------------------------------------------ */
 /* The catalogue — nine invented issuers, five maturities each         */
 /* ------------------------------------------------------------------ */
-
-export interface Issuer {
-    name: string;
-    ratingValue: number;
-    source: 'MOODYS' | 'FITCH' | 'SPGLOBAL';
-    coupon: string;
-    maturities: Record<TermKey, string>;
-}
 
 export const CATALOGUE: Issuer[] = [
     {
@@ -151,16 +153,6 @@ export const CATALOGUE: Issuer[] = [
     },
 ];
 
-export interface Bond {
-    id: string;
-    issuer: string;
-    ratingValue: number;
-    source: string;
-    coupon: string;
-    maturity: string;
-    term: string;
-}
-
 /** Every mark on the credit map. */
 export const BONDS: Bond[] = CATALOGUE.flatMap((issuer) =>
     TERMS.map((term) => ({
@@ -183,15 +175,6 @@ export function bondId(issuer: string, maturity: string): string {
 /* Profiles                                                            */
 /* ------------------------------------------------------------------ */
 
-export type ProfileKey = 'conservative' | 'balanced';
-
-export interface Profile {
-    key: ProfileKey;
-    name: string;
-    floorValue: number;
-    maxIssuerShare: string;
-}
-
 export const PROFILES: Record<ProfileKey, Profile> = {
     conservative: { key: 'conservative', name: 'Conservative', floorValue: 7, maxIssuerShare: '20%' },
     balanced: { key: 'balanced', name: 'Balanced', floorValue: 10, maxIssuerShare: '40%' },
@@ -202,28 +185,6 @@ export const PROFILE_ORDER: ProfileKey[] = ['conservative', 'balanced'];
 /* ------------------------------------------------------------------ */
 /* Term sheets — figures given verbatim for a 1,000.00 USDC deposit    */
 /* ------------------------------------------------------------------ */
-
-export interface Holding {
-    issuer: string;
-    ratingValue: number;
-    source: string;
-    maturity: string;
-    term: string;
-    /** Share of the deposit, fixed at one fifth per maturity. */
-    amount: number;
-    share: string;
-    coupon: string;
-    couponNumber: number;
-}
-
-export interface Sheet {
-    /** Rating floor this sheet was built against. */
-    floorValue: number;
-    holdings: Holding[];
-    couponTotal: number;
-    weightedRating: string;
-    issuerNote: string;
-}
 
 export const SHEET_CONSERVATIVE: Sheet = {
     floorValue: 7,
@@ -333,15 +294,6 @@ export const POSITION = {
     nextMaturity: '2026-12-03 · KESTREL-RAIL · 200.00 USDC',
 };
 
-export interface HeldRow {
-    issuer: string;
-    ratingValue: number;
-    maturity: string;
-    daysRemaining: string;
-    amount: string;
-    accrued: string;
-}
-
 export const HELD_ROWS: HeldRow[] = [
     { issuer: 'KESTREL-RAIL', ratingValue: 4, maturity: '2026-12-03', daysRemaining: '48', amount: '200.00 USDC', accrued: '0.97 USDC' },
     { issuer: 'NORDLYS-ENERGI', ratingValue: 3, maturity: '2027-02-28', daysRemaining: '135', amount: '200.00 USDC', accrued: '0.90 USDC' },
@@ -364,18 +316,6 @@ export const RECONCILIATION = {
 /* ------------------------------------------------------------------ */
 /* Screen 3 — redemption                                               */
 /* ------------------------------------------------------------------ */
-
-export interface RedemptionQuote {
-    percent: number;
-    positionValue: string;
-    positionValueNumber: number;
-    spread: string;
-    spreadNumber: number;
-    receive: string;
-    receiveNumber: number;
-    /** Remaining amount held against each of the five maturities. */
-    remainderEach: string;
-}
 
 /** The 100% row: every off-preset size on the slider is scaled from it. */
 export const REDEMPTION_FULL: RedemptionQuote = {
@@ -402,14 +342,6 @@ export const REDEMPTION = {
 /* ------------------------------------------------------------------ */
 /* Screen 4 — register of events                                       */
 /* ------------------------------------------------------------------ */
-
-export interface RegisterEntry {
-    date: string;
-    event: string;
-    description: string;
-    amount: string;
-    illustration?: 'rating-breach';
-}
 
 export const REGISTER: RegisterEntry[] = [
     {

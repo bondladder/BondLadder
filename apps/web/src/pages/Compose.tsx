@@ -16,7 +16,7 @@ import {
     sheetForFloor,
     tooFewIssuersRefusal,
     type ProfileKey,
-} from '@/lib/mockSource';
+} from '@/lib/source';
 
 export default function Compose() {
     const navigate = useNavigate();

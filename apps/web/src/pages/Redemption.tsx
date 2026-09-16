@@ -7,7 +7,7 @@ import {
     REDEMPTION_FULL,
     REDEMPTION_PRESETS,
     type RedemptionQuote,
-} from '@/lib/mockSource';
+} from '@/lib/source';
 
 /**
  * Figures are looked up, never derived from a rate. The four preset marks are

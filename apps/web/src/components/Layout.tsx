@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { BALANCE_CHIP, BANNER } from '@/lib/mockSource';
+import { BALANCE_CHIP, BANNER } from '@/lib/source';
 
 const NAV = [
     { to: '/', label: 'Compose', end: true },

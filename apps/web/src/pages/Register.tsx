@@ -5,7 +5,7 @@ import {
     REGISTER,
     REGISTER_PREAMBLE,
     gradeLabel,
-} from '@/lib/mockSource';
+} from '@/lib/source';
 
 export default function Register() {
     return (

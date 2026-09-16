@@ -8,7 +8,7 @@ import {
     SHEET_CONSERVATIVE,
     bondId,
     gradeLabel,
-} from '@/lib/mockSource';
+} from '@/lib/source';
 
 const HEADER_ROWS: Array<[string, string]> = [
     ['Position value', POSITION.valueLabel],

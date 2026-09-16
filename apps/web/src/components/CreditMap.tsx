@@ -7,7 +7,7 @@ import {
     RATING_MAX,
     RATING_MIN,
     gradeLabel,
-} from '@/lib/mockSource';
+} from '@/lib/source';
 
 export interface CreditMapMark {
     id: string;
