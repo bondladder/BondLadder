@@ -6,7 +6,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
-    "deploy:devnet": "tsx src/deploy.ts"
+    "deploy:devnet": "tsx src/deploy.ts",
+    "demo:deposit": "tsx src/demo-deposit.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

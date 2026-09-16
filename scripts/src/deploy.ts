@@ -37,7 +37,7 @@ export const AGENCY_CODE_LEN = 8
 export const RATING_LABEL_LEN = 4
 
 const USDC_DECIMALS = 6
-const MICRO_PER_USDC = 1_000_000n
+export const MICRO_PER_USDC = 1_000_000n
 
 /// Рейтинг старший за цей строк програма не приймає (FR-025). На демо строк
 /// довгий навмисно: повторний прогін скрипта — єдине, що оновлює мітки часу,
@@ -131,7 +131,7 @@ export function instrumentMintKeypair(
   return Keypair.fromSeed(seed.subarray(0, 32))
 }
 
-function loadKeypair(path: string): Keypair {
+export function loadKeypair(path: string): Keypair {
   const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
   if (!Array.isArray(parsed) || parsed.some((byte) => typeof byte !== 'number')) {
     throw new DeployError(`${path}: не схоже на файл ключа Solana`)
@@ -140,7 +140,7 @@ function loadKeypair(path: string): Keypair {
   return Keypair.fromSecretKey(Uint8Array.from(parsed))
 }
 
-function readIdl<T>(name: string): T {
+export function readIdl<T>(name: string): T {
   const path = join(import.meta.dirname, '../../target/idl', `${name}.json`)
 
   return JSON.parse(readFileSync(path, 'utf8')) as T
@@ -157,7 +157,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-async function withRetry<T>(what: string, action: () => Promise<T>): Promise<T> {
+export async function withRetry<T>(what: string, action: () => Promise<T>): Promise<T> {
   for (let attempt = 1; ; attempt += 1) {
     try {
       return await action()
@@ -204,14 +204,14 @@ async function confirm(connection: Connection, signature: string, until: number)
   }
 }
 
-async function sendAndConfirm(
+export async function sendAndConfirm(
   connection: Connection,
   what: string,
   instructions: readonly TransactionInstruction[],
   payer: Keypair,
   extraSigners: readonly Keypair[],
-): Promise<void> {
-  await withRetry(what, async () => {
+): Promise<string> {
+  return withRetry(what, async () => {
     const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
     const transaction = new Transaction({
       feePayer: payer.publicKey,
@@ -224,17 +224,19 @@ async function sendAndConfirm(
       preflightCommitment: 'confirmed',
     })
     await confirm(connection, signature, lastValidBlockHeight)
+
+    return signature
   })
 }
 
-function pda(seeds: readonly Uint8Array[], programId: PublicKey): PublicKey {
+export function pda(seeds: readonly Uint8Array[], programId: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync([...seeds], programId)[0]
 }
 
-const SEED_VAULT = Buffer.from('vault')
-const SEED_ORACLE = Buffer.from('oracle')
-const SEED_ISSUER = Buffer.from('issuer')
-const SEED_INSTRUMENT = Buffer.from('instrument')
+export const SEED_VAULT = Buffer.from('vault')
+export const SEED_ORACLE = Buffer.from('oracle')
+export const SEED_ISSUER = Buffer.from('issuer')
+export const SEED_INSTRUMENT = Buffer.from('instrument')
 
 export async function main(): Promise<void> {
   const rpcUrl = process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.com'
