@@ -26,7 +26,13 @@ import {
   Transaction,
   type TransactionInstruction,
 } from '@solana/web3.js'
-import { notchForLabel } from '@bondladder/shared'
+import {
+  notchForLabel,
+  SEED_INSTRUMENT,
+  SEED_ISSUER,
+  SEED_ORACLE,
+  SEED_VAULT,
+} from '@bondladder/shared'
 import type { BondLadder } from '../../target/types/bond_ladder'
 import type { MockIssuer } from '../../target/types/mock_issuer'
 import type { RatingOracle } from '../../target/types/rating_oracle'
@@ -232,11 +238,6 @@ export async function sendAndConfirm(
 export function pda(seeds: readonly Uint8Array[], programId: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync([...seeds], programId)[0]
 }
-
-export const SEED_VAULT = Buffer.from('vault')
-export const SEED_ORACLE = Buffer.from('oracle')
-export const SEED_ISSUER = Buffer.from('issuer')
-export const SEED_INSTRUMENT = Buffer.from('instrument')
 
 export async function main(): Promise<void> {
   const rpcUrl = process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.com'

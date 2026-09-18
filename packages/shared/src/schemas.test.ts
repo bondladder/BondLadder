@@ -1,16 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import rawFixture from '../../../fixtures/accounts.json'
+import { RUNG_MONTHS } from './profiles'
 import {
   AccountDecodeError,
   decodeInstrument,
   decodeIssuerConfig,
   decodeOracleConfig,
+  decodePosition,
   decodeRatingRecord,
   decodeVault,
+  positionSchema,
   vaultSchema,
 } from './schemas'
 
-type Decoded = Record<string, string | number | boolean>
+type Decoded = Record<string, unknown>
 
 const cases = rawFixture.accounts as ReadonlyArray<{
   case: string
@@ -20,6 +23,10 @@ const cases = rawFixture.accounts as ReadonlyArray<{
 }>
 
 const DISCRIMINATOR_LENGTH = 8
+
+const PROFILE_AT = DISCRIMINATOR_LENGTH + 32
+const RUNG_WIDTH = 1 + 32 + 8 + 8 + 1 + 8 + 1
+const FIRST_RUNG_FLAGGED_AT = PROFILE_AT + 1 + RUNG_WIDTH - 1
 
 function bytes(hex: string): Uint8Array {
   const out = new Uint8Array(hex.length / 2)
@@ -49,9 +56,18 @@ function decodedBy(account: string, data: Uint8Array): unknown {
       return decodeIssuerConfig(data)
     case 'Instrument':
       return decodeInstrument(data)
+    case 'Position':
+      return decodePosition(data)
     default:
       throw new Error(`у фікстурі невідомий акаунт ${account}`)
   }
+}
+
+function rungsOf(raw: unknown): readonly Decoded[] {
+  if (!Array.isArray(raw)) {
+    throw new Error('у фікстурі щаблі не масив')
+  }
+  return raw as readonly Decoded[]
 }
 
 function expectedFor(account: string, d: Decoded): unknown {
@@ -103,6 +119,25 @@ function expectedFor(account: string, d: Decoded): unknown {
         priceMicro: BigInt(String(d.priceMicro)),
         bump: Number(d.bump),
       }
+    case 'Position':
+      return {
+        owner: String(d.owner),
+        profile: String(d.profile),
+        rungs: rungsOf(d.rungs).map((rung) => ({
+          targetMonths: Number(rung.targetMonths),
+          instrument: String(rung.instrument),
+          amount: BigInt(String(rung.amount)),
+          entryPriceMicro: BigInt(String(rung.entryPriceMicro)),
+          entryNotch: Number(rung.entryNotch),
+          maturityTs: BigInt(String(rung.maturityTs)),
+          flagged: rung.flagged === true,
+        })),
+        principalUsdc: BigInt(String(d.principalUsdc)),
+        feeAccrued: BigInt(String(d.feeAccrued)),
+        lastFeeTs: BigInt(String(d.lastFeeTs)),
+        openedAt: BigInt(String(d.openedAt)),
+        bump: Number(d.bump),
+      }
     default:
       throw new Error(`у фікстурі невідомий акаунт ${account}`)
   }
@@ -110,7 +145,7 @@ function expectedFor(account: string, d: Decoded): unknown {
 
 describe('декодери акаунтів', () => {
   it('декодують кожен випадок зі спільного фікстура', () => {
-    expect(cases.length).toBe(7)
+    expect(cases.length).toBe(9)
 
     for (const entry of cases) {
       expect(decodedBy(entry.account, bytes(entry.data))).toEqual(
@@ -188,6 +223,32 @@ describe('декодери акаунтів', () => {
 
     expect(decodeRatingRecord(bytes(before.data)).updatedAt).toBe(-1n)
   })
+
+  it('читають усі п’ять щаблів позиції', () => {
+    const held = decodePosition(bytes(caseNamed('position').data))
+
+    expect(held.rungs.map((rung) => rung.targetMonths)).toEqual(RUNG_MONTHS)
+    expect(held.profile).toBe('conservative')
+    expect(held.principalUsdc).toBe(997_527_450n)
+  })
+
+  it('відкидають позицію з невідомим профілем', () => {
+    const held = bytes(caseNamed('position').data)
+    held[PROFILE_AT] = 2
+
+    expect(() => decodePosition(held)).toThrow(AccountDecodeError)
+  })
+
+  it('відкидають прапорець щабля поза межами true/false', () => {
+    const held = bytes(caseNamed('position').data)
+    held[FIRST_RUNG_FLAGGED_AT] = 2
+
+    expect(() => decodePosition(held)).toThrow(AccountDecodeError)
+  })
+
+  it('відкидають позицію, прочитану декодером vault', () => {
+    expect(() => decodeVault(bytes(caseNamed('position').data))).toThrow(AccountDecodeError)
+  })
 })
 
 describe('схеми акаунтів', () => {
@@ -228,5 +289,18 @@ describe('схеми акаунтів', () => {
 
   it('відкидають зайве поле', () => {
     expect(vaultSchema.safeParse({ ...valid, surprise: 1 }).success).toBe(false)
+  })
+
+  it('відкидають позицію не з п’яти щаблів', () => {
+    const held = decodePosition(bytes(caseNamed('position').data))
+
+    expect(positionSchema.safeParse(held).success).toBe(true)
+    expect(positionSchema.safeParse({ ...held, rungs: held.rungs.slice(1) }).success).toBe(false)
+  })
+
+  it('відкидають профіль, якого програма не знає', () => {
+    const held = decodePosition(bytes(caseNamed('position').data))
+
+    expect(positionSchema.safeParse({ ...held, profile: 'aggressive' }).success).toBe(false)
   })
 })

@@ -39,7 +39,14 @@ import {
   type RiskProfile,
   SCALE_VERSION,
   decodeVault,
+  profileSeedByte,
   proposeLadder,
+  SEED_INSTRUMENT,
+  SEED_ISSUER,
+  SEED_ORACLE,
+  SEED_POSITION,
+  SEED_RATING,
+  SEED_VAULT,
 } from '@bondladder/shared'
 import type { BondLadder } from '../../target/types/bond_ladder'
 import type { RatingOracle } from '../../target/types/rating_oracle'
@@ -50,27 +57,17 @@ import {
   MICRO_PER_USDC,
   pda,
   readIdl,
-  SEED_INSTRUMENT,
-  SEED_ISSUER,
-  SEED_ORACLE,
-  SEED_VAULT,
   sendAndConfirm,
   VAULT_PARAMS,
   withRetry,
 } from './deploy'
 import { buildCatalog } from './seed-catalog'
 
-const SEED_RATING = Buffer.from('rating')
-const SEED_POSITION = Buffer.from('position')
-
 /// Демо вносить рівно мінімум vault: менший депозит програма відхилить, а
 /// більший нічого не додає до доказу.
 export const DEPOSIT_MICRO = VAULT_PARAMS.minDeposit
 
 export const DEMO_PROFILE: RiskProfile = 'conservative'
-
-/// Байт профілю в сіді позиції — той самий, що RiskProfile::seed_byte.
-const PROFILE_SEED_BYTE: Record<RiskProfile, number> = { conservative: 0, balanced: 1 }
 
 /// Профіль підбору і профіль у транзакції — одне значення: розійшовшись, вони
 /// дали б позицію під іншим порогом, і звірка щаблів цього не помітила б.
@@ -385,7 +382,7 @@ export async function main(): Promise<void> {
   console.log("кастодія   п'ять рахунків vault готові")
 
   const position = pda(
-    [SEED_POSITION, owner.publicKey.toBytes(), Uint8Array.of(PROFILE_SEED_BYTE[DEMO_PROFILE])],
+    [SEED_POSITION, owner.publicKey.toBytes(), Uint8Array.of(profileSeedByte(DEMO_PROFILE))],
     ladder.programId,
   )
   const remainingAccounts = proposal.allocations.flatMap(({ candidate }) =>

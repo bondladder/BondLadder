@@ -8,6 +8,8 @@
 
 import { z } from 'zod'
 
+import { RUNG_COUNT, type RiskProfile } from './profiles'
+
 export class AccountDecodeError extends Error {
   constructor(message: string) {
     super(message)
@@ -17,7 +19,7 @@ export class AccountDecodeError extends Error {
 
 const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 
-function encodeBase58(bytes: Uint8Array): string {
+export function encodeBase58(bytes: Uint8Array): string {
   let leadingZeros = 0
   while (leadingZeros < bytes.length && bytes[leadingZeros] === 0) {
     leadingZeros += 1
@@ -99,6 +101,18 @@ class Reader {
       return this.refuse(`прапорець має значення ${value}`)
     }
     return value === 1
+  }
+
+  // Варіант enum на дроті — індекс, а не назва. Невідомий індекс означає або
+  // чужий акаунт, або програму новішу за цей декодер; і те, і те читається
+  // неправильно, тому значення за замовчуванням тут бути не може.
+  variant<T extends string>(names: readonly T[]): T {
+    const index = this.u8()
+    const name = names[index]
+    if (name === undefined) {
+      return this.refuse(`варіант ${index} програмі невідомий`)
+    }
+    return name
   }
 
   address(): string {
@@ -210,11 +224,36 @@ export const instrumentSchema = z.strictObject({
   bump: u8Schema,
 })
 
+const profileSchema = z.enum(['conservative', 'balanced'])
+
+export const rungSchema = z.strictObject({
+  targetMonths: u8Schema,
+  instrument: addressSchema,
+  amount: u64Schema,
+  entryPriceMicro: u64Schema,
+  entryNotch: u8Schema,
+  maturityTs: i64Schema,
+  flagged: z.boolean(),
+})
+
+export const positionSchema = z.strictObject({
+  owner: addressSchema,
+  profile: profileSchema,
+  rungs: z.array(rungSchema).length(RUNG_COUNT),
+  principalUsdc: u64Schema,
+  feeAccrued: u64Schema,
+  lastFeeTs: i64Schema,
+  openedAt: i64Schema,
+  bump: u8Schema,
+})
+
 export type Vault = z.infer<typeof vaultSchema>
 export type OracleConfig = z.infer<typeof oracleConfigSchema>
 export type RatingRecord = z.infer<typeof ratingRecordSchema>
 export type IssuerConfig = z.infer<typeof issuerConfigSchema>
 export type Instrument = z.infer<typeof instrumentSchema>
+export type Rung = z.infer<typeof rungSchema>
+export type Position = z.infer<typeof positionSchema>
 
 const VAULT = {
   discriminator: [0xd3, 0x08, 0xe8, 0x2b, 0x02, 0x98, 0x75, 0x77],
@@ -241,6 +280,14 @@ const INSTRUMENT = {
   discriminator: [0x3b, 0x0e, 0x5c, 0x92, 0x73, 0x22, 0x9b, 0x91],
   size: DISCRIMINATOR_LENGTH + ADDRESS_LENGTH + 16 + 8 + 2 + 8 + 1,
   issuerIdWidth: 16,
+} as const
+
+const RUNG_SIZE = 1 + ADDRESS_LENGTH + 8 + 8 + 1 + 8 + 1
+
+const POSITION = {
+  discriminator: [0xaa, 0xbc, 0x8f, 0xe4, 0x7a, 0x40, 0xf7, 0xd0],
+  size: DISCRIMINATOR_LENGTH + ADDRESS_LENGTH + 1 + RUNG_COUNT * RUNG_SIZE + 4 * 8 + 1,
+  profiles: ['conservative', 'balanced'],
 } as const
 
 export function decodeVault(data: Uint8Array): Vault {
@@ -306,6 +353,33 @@ export function decodeInstrument(data: Uint8Array): Instrument {
     maturityTs: reader.i64(),
     couponBps: reader.u16(),
     priceMicro: reader.u64(),
+    bump: reader.u8(),
+  })
+}
+
+export function decodePosition(data: Uint8Array): Position {
+  const reader = open('Position', POSITION.discriminator, POSITION.size, data)
+
+  const owner = reader.address()
+  const profile: RiskProfile = reader.variant(POSITION.profiles)
+  const rungs = Array.from({ length: RUNG_COUNT }, () => ({
+    targetMonths: reader.u8(),
+    instrument: reader.address(),
+    amount: reader.u64(),
+    entryPriceMicro: reader.u64(),
+    entryNotch: reader.u8(),
+    maturityTs: reader.i64(),
+    flagged: reader.bool(),
+  }))
+
+  return checked('Position', positionSchema, {
+    owner,
+    profile,
+    rungs,
+    principalUsdc: reader.u64(),
+    feeAccrued: reader.u64(),
+    lastFeeTs: reader.i64(),
+    openedAt: reader.i64(),
     bump: reader.u8(),
   })
 }

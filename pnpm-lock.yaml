@@ -35,6 +35,15 @@ importers:
 
   apps/web:
     dependencies:
+      '@bondladder/shared':
+        specifier: workspace:^
+        version: link:../../packages/shared
+      '@solana/web3.js':
+        specifier: ^1.98.4
+        version: 1.98.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
+      buffer:
+        specifier: ^6.0.3
+        version: 6.0.3
       framer-motion:
         specifier: ^12.23.12
         version: 12.43.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -2762,7 +2771,7 @@ snapshots:
 
   is-number@7.0.0: {}
 
-  isomorphic-ws@4.0.1(ws@7.5.13(bufferutil@4.1.0)(utf-8-validate@6.0.6)):
+  isomorphic-ws@4.0.1(ws@7.5.13(bufferutil@4.1.0)):
     dependencies:
       ws: 7.5.13(bufferutil@4.1.0)(utf-8-validate@6.0.6)
 
@@ -2775,7 +2784,7 @@ snapshots:
       delay: 5.0.0
       es6-promisify: 5.0.0
       eyes: 0.1.8
-      isomorphic-ws: 4.0.1(ws@7.5.13(bufferutil@4.1.0)(utf-8-validate@6.0.6))
+      isomorphic-ws: 4.0.1(ws@7.5.13(bufferutil@4.1.0))
       json-stringify-safe: 5.0.1
       stream-json: 1.9.1
       uuid: 8.3.2

@@ -118,6 +118,128 @@
         "priceMicro": "1000000",
         "bump": 250
       }
+    },
+    {
+      "case": "position",
+      "account": "Position",
+      "data": "aabc8fe47a40f7d0070707070707070707070707070707070707070707070707070707070707070700030102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20ca00000000000000931b0f000000000003003a156a000000000006c8c358f50fea3edaeac936674a40d2393ca6cb137ccbbc9fa8e058cd382c8722cb00000000000000caf90e00000000000280328d6a000000000009c8d85b1964e99080631923a9c2a13e918454049b92ae1a9513894b2bb050dd1cce00000000000000cdc10e00000000000500ce076b00000000000c00000100000000000000000000000000000000000000000000000000000000ffce0000000000000027be0e00000000000180c67f6b000000000012ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd800000000000000e1160e0000000000060009716c00000000009a0f753b00000000000000000000000000939e690000000000939e6900000000fe",
+      "decoded": {
+        "owner": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "profile": "conservative",
+        "rungs": [
+          {
+            "targetMonths": 3,
+            "instrument": "4wBqpZM9xaSheZzJSMawUKKwhdpChKbZ5eu5ky4Vigw",
+            "amount": "202",
+            "entryPriceMicro": "990099",
+            "entryNotch": 3,
+            "maturityTs": "1779776000",
+            "flagged": false
+          },
+          {
+            "targetMonths": 6,
+            "instrument": "EWhJjvNVb5mh1Jb9DTzvTwk7BeS9qdZdK7a6vdneQPa9",
+            "amount": "203",
+            "entryPriceMicro": "981450",
+            "entryNotch": 2,
+            "maturityTs": "1787638400",
+            "flagged": false
+          },
+          {
+            "targetMonths": 9,
+            "instrument": "EX1tNj2MLTacJPfAVzbBW8ejFsnSp7AsnZvnRLmDy3vK",
+            "amount": "206",
+            "entryPriceMicro": "967117",
+            "entryNotch": 5,
+            "maturityTs": "1795673600",
+            "flagged": false
+          },
+          {
+            "targetMonths": 12,
+            "instrument": "11Cd4BX7vopdUjCBe56dfR9Mw86iDpdcAZbJ2yE8op",
+            "amount": "206",
+            "entryPriceMicro": "966183",
+            "entryNotch": 1,
+            "maturityTs": "1803536000",
+            "flagged": false
+          },
+          {
+            "targetMonths": 18,
+            "instrument": "JEKNVnkbo3jma5nREBBJCDoXFVeKkD56V3xKrvRmWxFG",
+            "amount": "216",
+            "entryPriceMicro": "923361",
+            "entryNotch": 6,
+            "maturityTs": "1819347200",
+            "flagged": false
+          }
+        ],
+        "principalUsdc": "997527450",
+        "feeAccrued": "0",
+        "lastFeeTs": "1772000000",
+        "openedAt": "1772000000",
+        "bump": 254
+      }
+    },
+    {
+      "case": "positionAtTheLimits",
+      "account": "Position",
+      "data": "aabc8fe47a40f7d0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff01030000000000000000000000000000000000000000000000000000000000000000ffffffffffffffffffffffffffffffff16000000000000008001060102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f200000000000000000010000000000000001ffffffffffffffff0109c8c358f50fea3edaeac936674a40d2393ca6cb137ccbbc9fa8e058cd382c87220100000000000000ffffffffffffffff160000000000000000000cc8d85b1964e99080631923a9c2a13e918454049b92ae1a9513894b2bb050dd1cffffffffffffffff010000000000000001ffffffffffffff7f011200000100000000000000000000000000000000000000000000000000000000ffffffffffffffffffffffffffffffffff0a000000000000008000ffffffffffffffffffffffffffffffff0000000000000080ffffffffffffff7fff",
+      "decoded": {
+        "owner": "JEKNVnkbo3jma5nREBBJCDoXFVeKkD56V3xKrvRmWxFG",
+        "profile": "balanced",
+        "rungs": [
+          {
+            "targetMonths": 3,
+            "instrument": "11111111111111111111111111111111",
+            "amount": "18446744073709551615",
+            "entryPriceMicro": "18446744073709551615",
+            "entryNotch": 22,
+            "maturityTs": "-9223372036854775808",
+            "flagged": true
+          },
+          {
+            "targetMonths": 6,
+            "instrument": "4wBqpZM9xaSheZzJSMawUKKwhdpChKbZ5eu5ky4Vigw",
+            "amount": "0",
+            "entryPriceMicro": "1",
+            "entryNotch": 1,
+            "maturityTs": "-1",
+            "flagged": true
+          },
+          {
+            "targetMonths": 9,
+            "instrument": "EWhJjvNVb5mh1Jb9DTzvTwk7BeS9qdZdK7a6vdneQPa9",
+            "amount": "1",
+            "entryPriceMicro": "18446744073709551615",
+            "entryNotch": 22,
+            "maturityTs": "0",
+            "flagged": false
+          },
+          {
+            "targetMonths": 12,
+            "instrument": "EX1tNj2MLTacJPfAVzbBW8ejFsnSp7AsnZvnRLmDy3vK",
+            "amount": "18446744073709551615",
+            "entryPriceMicro": "1",
+            "entryNotch": 1,
+            "maturityTs": "9223372036854775807",
+            "flagged": true
+          },
+          {
+            "targetMonths": 18,
+            "instrument": "11Cd4BX7vopdUjCBe56dfR9Mw86iDpdcAZbJ2yE8op",
+            "amount": "18446744073709551615",
+            "entryPriceMicro": "18446744073709551615",
+            "entryNotch": 10,
+            "maturityTs": "-9223372036854775808",
+            "flagged": false
+          }
+        ],
+        "principalUsdc": "18446744073709551615",
+        "feeAccrued": "18446744073709551615",
+        "lastFeeTs": "-9223372036854775808",
+        "openedAt": "9223372036854775807",
+        "bump": 255
+      }
     }
   ]
 }

@@ -12,7 +12,8 @@ use std::str::FromStr;
 
 use anchor_lang::prelude::Pubkey;
 use anchor_lang::AccountSerialize;
-use bond_ladder::state::Vault;
+use bond_ladder::profiles::RiskProfile;
+use bond_ladder::state::{Position, Rung, Vault};
 use mock_issuer::state::{Instrument, IssuerConfig};
 use rating_oracle::state::{OracleConfig, RatingRecord};
 use serde_json::Value;
@@ -100,6 +101,42 @@ fn vault(decoded: &Value) -> Vault {
     }
 }
 
+fn rung(decoded: &Value) -> Rung {
+    Rung {
+        target_months: small(&decoded["targetMonths"]),
+        instrument: address(&decoded["instrument"]),
+        amount: wide(&decoded["amount"]),
+        entry_price_micro: wide(&decoded["entryPriceMicro"]),
+        entry_notch: small(&decoded["entryNotch"]),
+        maturity_ts: signed(&decoded["maturityTs"]),
+        flagged: flag(&decoded["flagged"]),
+    }
+}
+
+fn position(decoded: &Value) -> Position {
+    let rungs: Vec<Rung> = decoded["rungs"]
+        .as_array()
+        .expect("щаблі — масив")
+        .iter()
+        .map(rung)
+        .collect();
+
+    Position {
+        owner: address(&decoded["owner"]),
+        profile: match decoded["profile"].as_str().expect("профіль — рядок") {
+            "conservative" => RiskProfile::Conservative,
+            "balanced" => RiskProfile::Balanced,
+            other => panic!("у фікстурі невідомий профіль {other}"),
+        },
+        rungs: rungs.try_into().expect("у позиції рівно п'ять щаблів"),
+        principal_usdc: wide(&decoded["principalUsdc"]),
+        fee_accrued: wide(&decoded["feeAccrued"]),
+        last_fee_ts: signed(&decoded["lastFeeTs"]),
+        opened_at: signed(&decoded["openedAt"]),
+        bump: small(&decoded["bump"]),
+    }
+}
+
 fn oracle_config(decoded: &Value) -> OracleConfig {
     OracleConfig {
         authority: address(&decoded["authority"]),
@@ -142,7 +179,7 @@ fn instrument(decoded: &Value) -> Instrument {
 fn account_layouts_match_the_shared_fixture() {
     let fixture = fixture();
     let accounts = fixture["accounts"].as_array().expect("accounts — масив");
-    assert_eq!(accounts.len(), 7);
+    assert_eq!(accounts.len(), 9);
 
     for entry in accounts {
         let case = entry["case"].as_str().expect("case — рядок");
@@ -154,6 +191,7 @@ fn account_layouts_match_the_shared_fixture() {
             "RatingRecord" => serialized(&rating_record(decoded)),
             "IssuerConfig" => serialized(&issuer_config(decoded)),
             "Instrument" => serialized(&instrument(decoded)),
+            "Position" => serialized(&position(decoded)),
             other => panic!("у фікстурі невідомий акаунт {other}"),
         };
 

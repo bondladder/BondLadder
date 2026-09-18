@@ -1,0 +1,89 @@
+{
+  "openLadder": {
+    "discriminator": "1fb002cc4898561e",
+    "accounts": [
+      {
+        "name": "vault",
+        "signer": false,
+        "writable": true
+      },
+      {
+        "name": "position",
+        "signer": false,
+        "writable": true
+      },
+      {
+        "name": "owner",
+        "signer": true,
+        "writable": true
+      },
+      {
+        "name": "ownerUsdc",
+        "signer": false,
+        "writable": true
+      },
+      {
+        "name": "oracleConfig",
+        "signer": false,
+        "writable": false
+      },
+      {
+        "name": "issuerProgram",
+        "signer": false,
+        "writable": false
+      },
+      {
+        "name": "issuerConfig",
+        "signer": false,
+        "writable": false
+      },
+      {
+        "name": "issuerTreasury",
+        "signer": false,
+        "writable": true
+      },
+      {
+        "name": "tokenProgram",
+        "signer": false,
+        "writable": false
+      },
+      {
+        "name": "systemProgram",
+        "signer": false,
+        "writable": false
+      }
+    ],
+    "cases": [
+      {
+        "case": "conservativeMinimum",
+        "profile": "conservative",
+        "depositMicro": "1000000000",
+        "data": "1fb002cc4898561e0000ca9a3b00000000"
+      },
+      {
+        "case": "balancedAtTheLimit",
+        "profile": "balanced",
+        "depositMicro": "18446744073709551615",
+        "data": "1fb002cc4898561e01ffffffffffffffff"
+      }
+    ]
+  },
+  "seeds": {
+    "vault": "vault",
+    "position": "position",
+    "oracle": "oracle",
+    "issuer": "issuer",
+    "instrument": "instrument",
+    "rating": "rating"
+  },
+  "profileSeedBytes": [
+    {
+      "profile": "conservative",
+      "seedByte": 0
+    },
+    {
+      "profile": "balanced",
+      "seedByte": 1
+    }
+  ]
+}
