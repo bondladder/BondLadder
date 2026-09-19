@@ -39,7 +39,12 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm gate
+      # Not `pnpm gate`: typechecking `scripts` needs target/types from `anchor build`,
+      # and the Solana toolchain has no business on a static-site deploy. Its tests
+      # still run — the target/ imports there are type-only.
+      - run: pnpm lint
+      - run: pnpm --filter '!@bondladder/scripts' typecheck
+      - run: pnpm -r test
 
       # A project site lives under /<repo>/, so the bundle is built for that base.
       # index.html is duplicated as 404.html: GitHub serves it for any deep link,

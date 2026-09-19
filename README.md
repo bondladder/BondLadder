@@ -30,13 +30,14 @@ ratings. Both are our own programs seeded with fictional issuers.
 ```bash
 pnpm install
 cp .env.example .env         # devnet defaults; only VITE_* reach the browser
-pnpm gate                    # lint + typecheck + TS tests
 anchor build                 # programs; also writes target/idl and target/types
+pnpm gate                    # lint + typecheck + TS tests
 cargo test --workspace       # program unit tests + mollusk instruction tests
 ```
 
-`cargo test` needs a prior `anchor build`: the instruction tests load the compiled
-`.so` from `target/deploy`. `anchor test` is not wired up — on-chain tests live in Rust.
+`anchor build` comes first on a fresh clone: `scripts` typechecks against the generated
+`target/types`, and the mollusk tests load the compiled `.so` from `target/deploy`.
+`anchor test` is not wired up — on-chain tests live in Rust.
 
 ## Devnet
 
