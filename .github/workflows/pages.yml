@@ -1,0 +1,63 @@
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # Everything prefixed VITE_ is baked into the bundle and is public by design.
+      # Program ids match Anchor.toml; the RPC URL falls back to the public devnet
+      # endpoint unless the repository provides its own (a key restricted to the
+      # Pages origin is the right kind).
+      VITE_SOLANA_RPC_URL: ${{ secrets.VITE_SOLANA_RPC_URL || 'https://api.devnet.solana.com' }}
+      VITE_SOLANA_CLUSTER: ${{ vars.VITE_SOLANA_CLUSTER || 'devnet' }}
+      VITE_BOND_LADDER_PROGRAM_ID: ${{ vars.VITE_BOND_LADDER_PROGRAM_ID || '5aKvW5hFUGw5hKzpz5DRYBK26EADqRHHgknmCU1EGNHe' }}
+      VITE_RATING_ORACLE_PROGRAM_ID: ${{ vars.VITE_RATING_ORACLE_PROGRAM_ID || 'EWhJjvNVb5mh1Jb9DTzvTwk7BeS9qdZdK7a6vdneQPa9' }}
+      VITE_MOCK_ISSUER_PROGRAM_ID: ${{ vars.VITE_MOCK_ISSUER_PROGRAM_ID || 'EX1tNj2MLTacJPfAVzbBW8ejFsnSp7AsnZvnRLmDy3vK' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm gate
+
+      # A project site lives under /<repo>/, so the bundle is built for that base.
+      # index.html is duplicated as 404.html: GitHub serves it for any deep link,
+      # and the router takes over from there.
+      - run: |
+          pnpm --filter @bondladder/web exec vite build --base="/${{ github.event.repository.name }}/"
+          cp apps/web/dist/index.html apps/web/dist/404.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

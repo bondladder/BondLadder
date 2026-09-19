@@ -57,6 +57,14 @@ DEPLOYER_KEYPAIR_PATH=/path/to/deployer.json pnpm run demo:deposit    # one depo
 
 Ratings expire after 30 days; re-running `deploy:devnet` is what refreshes them.
 
+## Hosting
+
+The web app deploys to GitHub Pages from `main` through `.github/workflows/pages.yml`:
+gate, build under `/<repository>/`, publish. Once in the repository settings, set
+**Pages → Source → GitHub Actions**. The workflow falls back to the public devnet RPC and
+the program ids above; a repository secret `VITE_SOLANA_RPC_URL` overrides the RPC (a key
+restricted to the Pages origin, since every `VITE_*` value ends up in the bundle).
+
 ## Layout
 
 ```
