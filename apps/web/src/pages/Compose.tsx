@@ -1,4 +1,4 @@
-import { type RiskProfile, maxIssuerBps, worstAllowedNotch } from '@bondladder/shared';
+import { maxIssuerBps, type RiskProfile, worstAllowedNotch } from '@bondladder/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import CreditMap from '@/components/CreditMap';
@@ -13,11 +13,11 @@ import {
 } from '@/lib/format';
 import {
     type Catalogue,
-    type Proposal,
     chartDomain,
     explorerTx,
     loadCatalogue,
     openPosition,
+    type Proposal,
     proposeDeposit,
     ratingAxis,
     readUsdcBalance,
@@ -148,8 +148,8 @@ export default function Compose() {
                 <h1 className="font-display text-[26px] leading-tight">The chain is out of reach</h1>
                 <p className="mt-4 max-w-[68ch] text-[15px] leading-relaxed">{loadFailure}</p>
                 <p className="mt-3 max-w-[68ch] text-[13px] leading-relaxed text-ink-muted">
-                    Nothing has been moved. The catalogue, the ratings and the vault are all read
-                    from the network before anything is offered.
+                    Nothing has been moved. The catalogue, the ratings and the vault are all read from the network
+                    before anything is offered.
                 </p>
             </section>
         );
@@ -162,8 +162,7 @@ export default function Compose() {
     const sheet = outcome?.ok === true ? outcome.proposal.sheet : null;
     const refusal = outcome !== null && !outcome.ok ? outcome.refusal : null;
     const malformed = depositMicro === null ? 'That is not an amount of USDC.' : null;
-    const shortOfBalance =
-        balanceMicro !== null && depositMicro !== null && depositMicro > balanceMicro;
+    const shortOfBalance = balanceMicro !== null && depositMicro !== null && depositMicro > balanceMicro;
 
     return (
         <div className="space-y-10">
@@ -188,12 +187,11 @@ export default function Compose() {
                     domain={domain}
                 />
                 <p className="mt-3 max-w-[62ch] text-[12px] leading-relaxed text-ink-muted">
-                    Filled marks are the position: five issuers, one at each maturity, joined left to
-                    right. Hollow marks sit below the floor and are never bought.
+                    Filled marks are the position: five issuers, one at each maturity, joined left to right. Hollow
+                    marks sit below the floor and are never bought.
                 </p>
                 <p className="figure mt-2 text-[11px] text-ink-faint">
-                    {entries.length} of {loaded.catalogue.instrumentCount} instruments carry a usable
-                    rating today
+                    {entries.length} of {loaded.catalogue.instrumentCount} instruments carry a usable rating today
                 </p>
             </section>
 
@@ -242,8 +240,8 @@ export default function Compose() {
                             ))}
                         </div>
                         <p className="figure mt-2 text-[11px] text-ink-faint">
-                            Floor {notchLabel(worstAllowedNotch(profile))} · max{' '}
-                            {percentFromBps(maxIssuerBps(profile))} of one issuer
+                            Floor {notchLabel(worstAllowedNotch(profile))} · max {percentFromBps(maxIssuerBps(profile))}{' '}
+                            of one issuer
                         </p>
                     </div>
 
@@ -294,7 +292,11 @@ export default function Compose() {
                         >
                             See it on the explorer
                         </a>
-                        , or read it back on the <Link to="/position" className="border-b border-rule-strong">statement</Link>.
+                        , or read it back on the{' '}
+                        <Link to="/position" className="border-b border-rule-strong">
+                            statement
+                        </Link>
+                        .
                     </p>
                 </section>
             )}
@@ -336,31 +338,21 @@ export default function Compose() {
                         <tbody>
                             {sheet.rows.map((row) => (
                                 <tr key={row.entry.mint} className="border-b border-rule">
-                                    <td className="py-3 pr-4 font-display text-[15px]">
-                                        {row.entry.issuerId}
-                                    </td>
+                                    <td className="py-3 pr-4 font-display text-[15px]">{row.entry.issuerId}</td>
                                     <td className="figure py-3 pr-4">{notchLabel(row.entry.notch)}</td>
                                     <td className="py-3 pr-4 text-[12px] tracking-wide text-ink-muted">
                                         {row.entry.agencyCode}
                                     </td>
-                                    <td className="figure py-3 pr-4">
-                                        {maturityDate(row.entry.maturityTs)}
-                                    </td>
-                                    <td className="py-3 pr-4 text-ink-muted">
-                                        {termLabel(row.rungMonths)}
-                                    </td>
+                                    <td className="figure py-3 pr-4">{maturityDate(row.entry.maturityTs)}</td>
+                                    <td className="py-3 pr-4 text-ink-muted">{termLabel(row.rungMonths)}</td>
                                     <td className="figure py-3 pl-4 text-right">
                                         {percentFromBps(row.entry.couponBps)}
                                     </td>
                                     <td className="figure py-3 pl-4 text-right">
                                         {usdcFromMicro(row.entry.priceMicro)}
                                     </td>
-                                    <td className="figure py-3 pl-4 text-right">
-                                        {row.units.toString()}
-                                    </td>
-                                    <td className="figure py-3 pl-4 text-right">
-                                        {usdcFromMicro(row.spentMicro)}
-                                    </td>
+                                    <td className="figure py-3 pl-4 text-right">{row.units.toString()}</td>
+                                    <td className="figure py-3 pl-4 text-right">{usdcFromMicro(row.spentMicro)}</td>
                                 </tr>
                             ))}
                         </tbody>
@@ -372,9 +364,7 @@ export default function Compose() {
                             <div key={row.entry.mint} className="border-b border-rule py-4">
                                 <div className="mb-2 flex items-baseline justify-between gap-3">
                                     <span className="font-display text-[16px]">{row.entry.issuerId}</span>
-                                    <span className="figure text-[14px]">
-                                        {notchLabel(row.entry.notch)}
-                                    </span>
+                                    <span className="figure text-[14px]">{notchLabel(row.entry.notch)}</span>
                                 </div>
                                 <dl className="space-y-1 text-[13px]">
                                     {[
@@ -386,10 +376,7 @@ export default function Compose() {
                                         ['Units', row.units.toString()],
                                         ['Amount', usdcFromMicro(row.spentMicro)],
                                     ].map(([label, value]) => (
-                                        <div
-                                            key={label}
-                                            className="flex items-baseline justify-between gap-4"
-                                        >
+                                        <div key={label} className="flex items-baseline justify-between gap-4">
                                             <dt className="text-ink-faint">{label}</dt>
                                             <dd className="figure">{value}</dd>
                                         </div>
@@ -400,15 +387,14 @@ export default function Compose() {
                     </div>
 
                     <p className="figure mt-4 text-[13px] leading-relaxed text-ink-muted">
-                        Deposit {usdcFromMicro(sheet.depositMicro)} · Invested{' '}
-                        {usdcFromMicro(sheet.investedMicro)} · Weighted rating{' '}
-                        {weightedNotchLabel(sheet.weightedNotch)} · {sheet.issuerCount} issuers, none
+                        Deposit {usdcFromMicro(sheet.depositMicro)} · Invested {usdcFromMicro(sheet.investedMicro)} ·
+                        Weighted rating {weightedNotchLabel(sheet.weightedNotch)} · {sheet.issuerCount} issuers, none
                         above {percentFromBps(sheet.largestIssuerBps)}
                     </p>
                     {sheet.returnedMicro > 0n && (
                         <p className="figure mt-1 text-[13px] leading-relaxed text-ink-muted">
-                            {usdcFromMicro(sheet.returnedMicro)} stays in your wallet: the route buys
-                            whole units, and that tail does not reach the price of one.
+                            {usdcFromMicro(sheet.returnedMicro)} stays in your wallet: the route buys whole units, and
+                            that tail does not reach the price of one.
                         </p>
                     )}
                 </section>

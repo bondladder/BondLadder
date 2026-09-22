@@ -1,14 +1,6 @@
 import { Link } from 'react-router-dom';
 import CreditMap from '@/components/CreditMap';
-import {
-    BONDS,
-    HELD_ROWS,
-    POSITION,
-    RECONCILIATION,
-    SHEET_CONSERVATIVE,
-    bondId,
-    gradeLabel,
-} from '@/lib/source';
+import { BONDS, bondId, gradeLabel, HELD_ROWS, POSITION, RECONCILIATION, SHEET_CONSERVATIVE } from '@/lib/source';
 
 const HEADER_ROWS: Array<[string, string]> = [
     ['Position value', POSITION.valueLabel],

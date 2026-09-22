@@ -22,8 +22,9 @@
 
     --oob: 32 14% 90%;
 
-    --font-display: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
-    --font-body: ui-sans-serif, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    --font-display:
+      "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --font-body: ui-sans-serif, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
 
     /* Tailwind defaults an uncoloured border to currentColor; the reset below pins it. */
     --border: var(--rule);
@@ -43,23 +44,25 @@
     background-color: hsl(var(--paper));
     color: hsl(var(--ink));
     font-family: var(--font-body);
-    font-feature-settings: 'kern' 1;
+    font-feature-settings: "kern" 1;
     -webkit-font-smoothing: antialiased;
   }
 
   /* Every figure is tabular and lining. */
   .figure {
     font-variant-numeric: tabular-nums lining-nums;
-    font-feature-settings: 'tnum' 1, 'lnum' 1;
+    font-feature-settings:
+      "tnum" 1,
+      "lnum" 1;
   }
 
-  input[type='number']::-webkit-outer-spin-button,
-  input[type='number']::-webkit-inner-spin-button {
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
     -webkit-appearance: none;
     margin: 0;
   }
 
-  input[type='number'] {
+  input[type="number"] {
     -moz-appearance: textfield;
   }
 }

@@ -1,12 +1,12 @@
 import {
     type Instrument,
-    type RatingRecord,
-    RUNG_MONTHS,
-    SCALE_VERSION,
     instrumentSchema,
     proposeLadder,
+    type RatingRecord,
+    RUNG_MONTHS,
     ratingRecordSchema,
     rungTargetTs,
+    SCALE_VERSION,
     vaultSchema,
 } from '@bondladder/shared';
 import { describe, expect, it } from 'vitest';
@@ -178,9 +178,7 @@ describe('termSheet', () => {
                 couponBps: 300 + index,
             }),
         ]),
-        RUNG_MONTHS.map((_, index) =>
-            rating({ instrumentMint: mintAt(index), notch: index + 1 }),
-        ),
+        RUNG_MONTHS.map((_, index) => rating({ instrumentMint: mintAt(index), notch: index + 1 })),
         NOW,
         MAX_AGE,
     );

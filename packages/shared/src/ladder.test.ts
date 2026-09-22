@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import fixture from '../../../fixtures/ladder.json'
 import {
+  fillForShare,
+  issuerShareBps,
   type LadderCandidate,
   LadderFillError,
   type LadderProposal,
-  fillForShare,
-  issuerShareBps,
   proposeLadder,
   rungTargetTs,
   rungWindow,
   splitDeposit,
 } from './ladder'
-import { RUNG_COUNT, RUNG_MONTHS, maxIssuerBps } from './profiles'
+import { maxIssuerBps, RUNG_COUNT, RUNG_MONTHS } from './profiles'
 import { notchForLabel } from './scale'
 
 const NOW = 1_772_000_000n

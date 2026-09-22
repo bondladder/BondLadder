@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import fixture from '../../../fixtures/scale.json'
 import {
-  NOTCH_BEST,
-  NOTCH_WORST,
-  SCALE_VERSION,
   isValidNotch,
   labelForNotch,
   meetsThreshold,
+  NOTCH_BEST,
+  NOTCH_WORST,
   notchForLabel,
+  SCALE_VERSION,
 } from './scale'
 
 describe('шкала рейтингів', () => {

@@ -1,11 +1,5 @@
 import CreditMap from '@/components/CreditMap';
-import {
-    BREACH_FLOOR_VALUE,
-    BREACH_MARKS,
-    REGISTER,
-    REGISTER_PREAMBLE,
-    gradeLabel,
-} from '@/lib/source';
+import { BREACH_FLOOR_VALUE, BREACH_MARKS, gradeLabel, REGISTER, REGISTER_PREAMBLE } from '@/lib/source';
 
 export default function Register() {
     return (

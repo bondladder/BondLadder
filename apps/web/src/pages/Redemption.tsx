@@ -1,13 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { usdc } from '@/lib/format';
-import {
-    POSITION,
-    REDEMPTION,
-    REDEMPTION_FULL,
-    REDEMPTION_PRESETS,
-    type RedemptionQuote,
-} from '@/lib/source';
+import { POSITION, REDEMPTION, REDEMPTION_FULL, REDEMPTION_PRESETS, type RedemptionQuote } from '@/lib/source';
 
 /**
  * Figures are looked up, never derived from a rate. The four preset marks are
@@ -210,9 +204,7 @@ export default function Redemption() {
                         }}
                         className="figure w-40 border-b border-rule-strong bg-transparent pb-1 text-right text-[14px] outline-none focus:border-mark"
                     />
-                    <span className="figure text-[11px] text-ink-faint">
-                        This redemption needs {quote.receive}
-                    </span>
+                    <span className="figure text-[11px] text-ink-faint">This redemption needs {quote.receive}</span>
                 </div>
             </section>
         </div>

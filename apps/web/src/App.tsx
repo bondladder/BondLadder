@@ -1,10 +1,10 @@
 import { Route, Routes } from 'react-router-dom';
 import Layout from './components/Layout';
 import Compose from './pages/Compose';
-import Statement from './pages/Statement';
+import NotFound from './pages/NotFound';
 import Redemption from './pages/Redemption';
 import Register from './pages/Register';
-import NotFound from './pages/NotFound';
+import Statement from './pages/Statement';
 
 const App = () => (
     <Routes>

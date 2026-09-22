@@ -4,13 +4,13 @@ import { RUNG_MONTHS } from './profiles'
 import { SCALE_VERSION } from './scale'
 import {
   AccountDecodeError,
-  isRatingUsable,
   decodeInstrument,
   decodeIssuerConfig,
   decodeOracleConfig,
   decodePosition,
   decodeRatingRecord,
   decodeVault,
+  isRatingUsable,
   positionSchema,
   vaultSchema,
 } from './schemas'

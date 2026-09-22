@@ -1,11 +1,10 @@
-import { PublicKey } from '@solana/web3.js'
 import { instrumentSchema, ratingRecordSchema, SCALE_VERSION } from '@bondladder/shared'
+import { PublicKey } from '@solana/web3.js'
 import { describe, expect, it } from 'vitest'
-import { instrumentMintKeypair, VAULT_PARAMS } from './deploy'
 import {
-  catalogAddresses,
   type CatalogAddress,
   type CatalogRow,
+  catalogAddresses,
   custodyAddress,
   DEPOSIT_MICRO,
   type DevnetCandidate,
@@ -15,6 +14,7 @@ import {
   rungAccountMetas,
   toCandidates,
 } from './demo-deposit'
+import { instrumentMintKeypair, VAULT_PARAMS } from './deploy'
 import { buildCatalog } from './seed-catalog'
 
 const ISSUER_PROGRAM = new PublicKey('EX1tNj2MLTacJPfAVzbBW8ejFsnSp7AsnZvnRLmDy3vK')

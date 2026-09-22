@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import fixture from '../../../fixtures/math.json'
-import { BPS_DENOMINATOR, MathOverflowError, SECONDS_PER_YEAR, accrueFee } from './math'
+import { accrueFee, BPS_DENOMINATOR, MathOverflowError, SECONDS_PER_YEAR } from './math'
 
 const THOUSAND_USDC = 1_000_000_000n
 const FEE_BPS = 50

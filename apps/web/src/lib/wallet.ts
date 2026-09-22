@@ -211,20 +211,14 @@ export async function disconnect(name: string): Promise<void> {
  * який дав гаманець, — у ньому є ще й публічний ключ, і підміна його власною
  * копією ламає гаманці, що звіряють рахунок за тотожністю.
  */
-export async function signAndSend(
-    connected: ConnectedWallet,
-    chain: string,
-    transaction: Uint8Array,
-): Promise<string> {
+export async function signAndSend(connected: ConnectedWallet, chain: string, transaction: Uint8Array): Promise<string> {
     const wallet = known(connected.name);
     const send = method(wallet, SIGN_AND_SEND, 'signAndSendTransaction');
     if (send === null) {
         throw new WalletError(`${connected.name} не вміє підписувати транзакції Solana`);
     }
 
-    const account = accountsOf(wallet, chain).find(
-        (candidate) => address(candidate) === connected.address,
-    );
+    const account = accountsOf(wallet, chain).find((candidate) => address(candidate) === connected.address);
     if (account === undefined) {
         throw new WalletError(`${connected.name} більше не тримає рахунок ${connected.address}`);
     }

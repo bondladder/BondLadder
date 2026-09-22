@@ -8,7 +8,7 @@
 
 import { z } from 'zod'
 
-import { RUNG_COUNT, type RiskProfile } from './profiles'
+import { type RiskProfile, RUNG_COUNT } from './profiles'
 import { SCALE_VERSION } from './scale'
 
 export class AccountDecodeError extends Error {

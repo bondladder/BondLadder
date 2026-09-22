@@ -1,13 +1,6 @@
 import { motion } from 'framer-motion';
 import { notchLabel } from '@/lib/format';
-import {
-    AXIS_GRADE_VALUES,
-    CHART_X_MAX,
-    CHART_X_MIN,
-    CHART_X_TICKS,
-    RATING_MAX,
-    RATING_MIN,
-} from '@/lib/source';
+import { AXIS_GRADE_VALUES, CHART_X_MAX, CHART_X_MIN, CHART_X_TICKS, RATING_MAX, RATING_MIN } from '@/lib/source';
 
 export interface CreditMapMark {
     id: string;
@@ -65,9 +58,7 @@ export default function CreditMap({
     const ratingMax = domain?.ratingMax ?? RATING_MAX;
     const axisValues = domain?.axisValues ?? AXIS_GRADE_VALUES;
 
-    const pad = mini
-        ? { top: 12, right: 168, bottom: 16, left: 16 }
-        : { top: 18, right: 172, bottom: 40, left: 84 };
+    const pad = mini ? { top: 12, right: 168, bottom: 16, left: 16 } : { top: 18, right: 172, bottom: 40, left: 84 };
 
     const innerW = VB_W - pad.left - pad.right;
     const innerH = height - pad.top - pad.bottom;
@@ -149,7 +140,13 @@ export default function CreditMap({
                     ))}
 
                     {/* Frame */}
-                    <line x1={pad.left} x2={pad.left} y1={pad.top} y2={pad.top + innerH} stroke="hsl(var(--rule-strong))" />
+                    <line
+                        x1={pad.left}
+                        x2={pad.left}
+                        y1={pad.top}
+                        y2={pad.top + innerH}
+                        stroke="hsl(var(--rule-strong))"
+                    />
                     <line
                         x1={pad.left}
                         x2={pad.left + innerW}

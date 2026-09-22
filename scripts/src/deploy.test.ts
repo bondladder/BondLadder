@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   AGENCY_CODE_LEN,
   encodeFixedAscii,
+  ISSUER_ID_LEN,
   instrumentMintKeypair,
   isRateLimited,
-  ISSUER_ID_LEN,
   RATING_LABEL_LEN,
   toRatingArgs,
   toRegisterArgs,

@@ -11,12 +11,12 @@ import { createContext, type ReactNode, useCallback, useContext, useEffect, useM
 import { CHAIN } from './program';
 import {
     type ConnectedWallet,
-    type WalletHandle,
     connect as connectWallet,
     disconnect as disconnectWallet,
     listWallets,
     onWalletsChanged,
     signAndSend,
+    type WalletHandle,
 } from './wallet';
 
 interface WalletState {

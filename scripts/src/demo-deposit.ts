@@ -10,9 +10,29 @@
 // перезапускається скільки завгодно разів (позиція живе за адресою, виведеною
 // з власника) і вкладник не має жодних прав у програмах.
 
-import { pathToFileURL } from 'node:url'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import {
+  decodeInstrument,
+  decodeOracleConfig,
+  decodeRatingRecord,
+  decodeVault,
+  type Instrument,
+  isRatingUsable,
+  type LadderAllocation,
+  type LadderCandidate,
+  profileSeedByte,
+  proposeLadder,
+  type RatingRecord,
+  type RiskProfile,
+  SEED_INSTRUMENT,
+  SEED_ISSUER,
+  SEED_ORACLE,
+  SEED_POSITION,
+  SEED_RATING,
+  SEED_VAULT,
+} from '@bondladder/shared'
 import { AnchorProvider, BN, Program, Wallet } from '@coral-xyz/anchor'
 import {
   createAssociatedTokenAccountIdempotentInstruction,
@@ -28,26 +48,6 @@ import {
   SystemProgram,
   type TransactionInstruction,
 } from '@solana/web3.js'
-import {
-  decodeInstrument,
-  decodeOracleConfig,
-  decodeRatingRecord,
-  type Instrument,
-  type LadderAllocation,
-  type LadderCandidate,
-  type RatingRecord,
-  type RiskProfile,
-  isRatingUsable,
-  decodeVault,
-  profileSeedByte,
-  proposeLadder,
-  SEED_INSTRUMENT,
-  SEED_ISSUER,
-  SEED_ORACLE,
-  SEED_POSITION,
-  SEED_RATING,
-  SEED_VAULT,
-} from '@bondladder/shared'
 import type { BondLadder } from '../../target/types/bond_ladder'
 import type { RatingOracle } from '../../target/types/rating_oracle'
 import {

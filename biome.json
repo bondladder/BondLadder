@@ -12,7 +12,7 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "suspicious": {
         "noExplicitAny": "error",
         "noUnknownAtRules": {
@@ -38,5 +38,19 @@
       "semicolons": "asNeeded",
       "trailingCommas": "all"
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["apps/web/src/**/*.ts", "apps/web/src/**/*.tsx"],
+      "formatter": {
+        "indentWidth": 4,
+        "lineWidth": 120
+      },
+      "javascript": {
+        "formatter": {
+          "semicolons": "always"
+        }
+      }
+    }
+  ]
 }

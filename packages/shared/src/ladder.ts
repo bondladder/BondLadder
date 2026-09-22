@@ -8,11 +8,11 @@
 
 import { BPS_DENOMINATOR } from './math'
 import {
-  RUNG_COUNT,
-  RUNG_MONTHS,
-  type RiskProfile,
   admitsIssuerShare,
   admitsRating,
+  type RiskProfile,
+  RUNG_COUNT,
+  RUNG_MONTHS,
 } from './profiles'
 
 export class LadderFillError extends Error {

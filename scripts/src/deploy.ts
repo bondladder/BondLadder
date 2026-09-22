@@ -17,6 +17,13 @@ import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import {
+  notchForLabel,
+  SEED_INSTRUMENT,
+  SEED_ISSUER,
+  SEED_ORACLE,
+  SEED_VAULT,
+} from '@bondladder/shared'
 import { AnchorProvider, BN, Program, Wallet } from '@coral-xyz/anchor'
 import { createMint } from '@solana/spl-token'
 import {
@@ -26,13 +33,6 @@ import {
   Transaction,
   type TransactionInstruction,
 } from '@solana/web3.js'
-import {
-  notchForLabel,
-  SEED_INSTRUMENT,
-  SEED_ISSUER,
-  SEED_ORACLE,
-  SEED_VAULT,
-} from '@bondladder/shared'
 import type { BondLadder } from '../../target/types/bond_ladder'
 import type { MockIssuer } from '../../target/types/mock_issuer'
 import type { RatingOracle } from '../../target/types/rating_oracle'

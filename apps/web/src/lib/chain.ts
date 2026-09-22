@@ -16,23 +16,23 @@
  */
 
 import {
-    type Instrument,
-    INSTRUMENT_ACCOUNT,
-    type LadderAllocation,
-    type LadderCandidate,
-    type RatingRecord,
-    RATING_RECORD_ACCOUNT,
-    type RiskProfile,
-    type Vault,
     decodeInstrument,
     decodeOracleConfig,
     decodeRatingRecord,
     encodeBase58,
     fillForShare,
+    INSTRUMENT_ACCOUNT,
+    type Instrument,
     isRatingUsable,
     issuerShareBps,
+    type LadderAllocation,
+    type LadderCandidate,
     maxIssuerBps,
     proposeLadder,
+    RATING_RECORD_ACCOUNT,
+    type RatingRecord,
+    type RiskProfile,
+    type Vault,
 } from '@bondladder/shared';
 import { PublicKey } from '@solana/web3.js';
 import { usdcFromMicro } from './format';
@@ -140,9 +140,7 @@ export function joinCatalogue(
     return entries;
 }
 
-export function catalogueCandidates(
-    entries: readonly CatalogueEntry[],
-): readonly CatalogueCandidate[] {
+export function catalogueCandidates(entries: readonly CatalogueEntry[]): readonly CatalogueCandidate[] {
     return entries.map((entry) => ({
         issuerId: entry.issuerId,
         maturityTs: entry.maturityTs,
@@ -192,10 +190,7 @@ export function termSheet(
 
         investedMicro += spentMicro;
         notchWeighted += BigInt(candidate.notch) * spentMicro;
-        byIssuer.set(
-            candidate.issuerId,
-            (byIssuer.get(candidate.issuerId) ?? 0n) + amountMicro,
-        );
+        byIssuer.set(candidate.issuerId, (byIssuer.get(candidate.issuerId) ?? 0n) + amountMicro);
 
         rows.push({
             rungMonths,
@@ -288,15 +283,10 @@ export function tokenAmountFrom(data: Uint8Array | null): bigint {
         return 0n;
     }
     if (data.length !== TOKEN_ACCOUNT_SIZE) {
-        throw new ProgramClientError(
-            `token account has ${data.length} bytes instead of ${TOKEN_ACCOUNT_SIZE}`,
-        );
+        throw new ProgramClientError(`token account has ${data.length} bytes instead of ${TOKEN_ACCOUNT_SIZE}`);
     }
 
-    return new DataView(data.buffer, data.byteOffset, data.byteLength).getBigUint64(
-        TOKEN_ACCOUNT_AMOUNT_OFFSET,
-        true,
-    );
+    return new DataView(data.buffer, data.byteOffset, data.byteLength).getBigUint64(TOKEN_ACCOUNT_AMOUNT_OFFSET, true);
 }
 
 function scanFilters(layout: { discriminator: readonly number[]; size: number }) {
@@ -418,10 +408,7 @@ function proposalRefusal(
 }
 
 export async function readUsdcBalance(catalogue: Catalogue, owner: string): Promise<bigint> {
-    const data = await readTokenAccount(
-        new PublicKey(catalogue.vault.state.usdcMint),
-        new PublicKey(owner),
-    );
+    const data = await readTokenAccount(new PublicKey(catalogue.vault.state.usdcMint), new PublicKey(owner));
 
     return tokenAmountFrom(data);
 }

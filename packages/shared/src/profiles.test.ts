@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import fixture from '../../../fixtures/profiles.json'
 import {
-  RUNG_COUNT,
-  RUNG_MONTHS,
-  type RiskProfile,
   admitsIssuerShare,
   admitsRating,
   maxIssuerBps,
+  type RiskProfile,
+  RUNG_COUNT,
+  RUNG_MONTHS,
   worstAllowedNotch,
 } from './profiles'
 import { NOTCH_BEST, NOTCH_WORST, notchForLabel } from './scale'

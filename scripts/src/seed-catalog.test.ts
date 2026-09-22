@@ -1,6 +1,6 @@
-import { RUNG_MONTHS, admitsRating, notchForLabel, proposeLadder } from '@bondladder/shared'
+import { admitsRating, notchForLabel, proposeLadder, RUNG_MONTHS } from '@bondladder/shared'
 import { describe, expect, it } from 'vitest'
-import { type CatalogEntry, buildCatalog } from './seed-catalog'
+import { buildCatalog, type CatalogEntry } from './seed-catalog'
 
 const REFERENCE_TS = 1_772_000_000n
 

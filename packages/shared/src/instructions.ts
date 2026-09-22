@@ -72,11 +72,7 @@ export function openLadderData(profile: RiskProfile, depositMicro: bigint): Uint
   data.set(OPEN_LADDER_DISCRIMINATOR)
   data[OPEN_LADDER_DISCRIMINATOR.length] = PROFILE_VARIANT[profile]
 
-  new DataView(data.buffer).setBigUint64(
-    OPEN_LADDER_DISCRIMINATOR.length + 1,
-    depositMicro,
-    true,
-  )
+  new DataView(data.buffer).setBigUint64(OPEN_LADDER_DISCRIMINATOR.length + 1, depositMicro, true)
 
   return data
 }

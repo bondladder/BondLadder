@@ -25,7 +25,6 @@ import {
     SEED_VAULT,
     type Vault,
 } from '@bondladder/shared';
-import { Buffer } from 'buffer';
 import {
     type AccountMeta,
     Connection,
@@ -34,6 +33,7 @@ import {
     Transaction,
     TransactionInstruction,
 } from '@solana/web3.js';
+import { Buffer } from 'buffer';
 
 // Глобального Buffer у браузері немає, а web3.js вимагає саме його: дані
 // інструкції — Buffer, не Uint8Array.
@@ -98,10 +98,7 @@ export function vaultAddress(): PublicKey {
 }
 
 export function positionAddress(owner: PublicKey, profile: RiskProfile): PublicKey {
-    return pda(
-        [SEED_POSITION, owner.toBytes(), Uint8Array.of(profileSeedByte(profile))],
-        bondLadderProgramId(),
-    );
+    return pda([SEED_POSITION, owner.toBytes(), Uint8Array.of(profileSeedByte(profile))], bondLadderProgramId());
 }
 
 export function oracleConfigAddress(ratingOracle: PublicKey): PublicKey {
@@ -121,10 +118,7 @@ export function ratingAddress(mint: PublicKey, ratingOracle: PublicKey): PublicK
 }
 
 export function associatedTokenAddress(mint: PublicKey, owner: PublicKey): PublicKey {
-    return pda(
-        [owner.toBytes(), TOKEN_PROGRAM_ID.toBytes(), mint.toBytes()],
-        ASSOCIATED_TOKEN_PROGRAM_ID,
-    );
+    return pda([owner.toBytes(), TOKEN_PROGRAM_ID.toBytes(), mint.toBytes()], ASSOCIATED_TOKEN_PROGRAM_ID);
 }
 
 /**
@@ -169,10 +163,7 @@ export async function readVault(): Promise<VaultState> {
 }
 
 /** Позиції може не бути — це нормальний стан гаманця, який ще не вкладав. */
-export async function readPosition(
-    owner: PublicKey,
-    profile: RiskProfile,
-): Promise<Position | null> {
+export async function readPosition(owner: PublicKey, profile: RiskProfile): Promise<Position | null> {
     const info = await connection().getAccountInfo(positionAddress(owner, profile));
 
     return info === null ? null : decodePosition(info.data);
@@ -205,9 +196,7 @@ function rungMetas(rung: RungAccounts): AccountMeta[] {
 
 export function openLadderInstruction(input: DepositInput): TransactionInstruction {
     if (input.rungs.length !== RUNG_COUNT) {
-        throw new ProgramClientError(
-            `лествиця з ${input.rungs.length} щаблів замість ${RUNG_COUNT}`,
-        );
+        throw new ProgramClientError(`лествиця з ${input.rungs.length} щаблів замість ${RUNG_COUNT}`);
     }
 
     const { usdcMint, issuerProgram, ratingOracle } = input.vault.state;
@@ -247,10 +236,7 @@ export function openLadderInstruction(input: DepositInput): TransactionInstructi
     });
 }
 
-async function serialize(
-    owner: PublicKey,
-    instructions: readonly TransactionInstruction[],
-): Promise<Uint8Array> {
+async function serialize(owner: PublicKey, instructions: readonly TransactionInstruction[]): Promise<Uint8Array> {
     const { blockhash } = await connection().getLatestBlockhash('confirmed');
 
     const transaction = new Transaction({ feePayer: owner, recentBlockhash: blockhash });
@@ -280,10 +266,7 @@ export async function buildDeposit(input: DepositInput): Promise<Uint8Array> {
  * на дві транзакції лишає депозит тим, чим його міряє SC-002: однією
  * транзакцією, ≈114 000 CU.
  */
-export async function missingCustody(
-    vault: PublicKey,
-    mints: readonly PublicKey[],
-): Promise<readonly PublicKey[]> {
+export async function missingCustody(vault: PublicKey, mints: readonly PublicKey[]): Promise<readonly PublicKey[]> {
     const addresses = mints.map((mint) => associatedTokenAddress(mint, vault));
     const infos = await connection().getMultipleAccountsInfo(addresses);
 
@@ -301,10 +284,7 @@ export async function buildCustodySetup(
     );
 }
 
-export async function readTokenAccount(
-    mint: PublicKey,
-    owner: PublicKey,
-): Promise<Uint8Array | null> {
+export async function readTokenAccount(mint: PublicKey, owner: PublicKey): Promise<Uint8Array | null> {
     const info = await connection().getAccountInfo(associatedTokenAddress(mint, owner));
 
     return info === null ? null : info.data;
