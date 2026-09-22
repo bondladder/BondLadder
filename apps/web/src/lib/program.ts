@@ -57,8 +57,14 @@ function required(name: string): string {
 
 export const RPC_URL = env.VITE_SOLANA_RPC_URL ?? 'https://api.devnet.solana.com';
 
+export const CLUSTER = env.VITE_SOLANA_CLUSTER ?? 'devnet';
+
 /** Мережа у записі Wallet Standard: саме її гаманець звіряє перед підписом. */
-export const CHAIN = `solana:${env.VITE_SOLANA_CLUSTER ?? 'devnet'}`;
+export const CHAIN = `solana:${CLUSTER}`;
+
+export function explorerTx(signature: string): string {
+    return `https://explorer.solana.com/tx/${signature}?cluster=${CLUSTER}`;
+}
 
 let programId: PublicKey | null = null;
 
@@ -119,6 +125,32 @@ export function associatedTokenAddress(mint: PublicKey, owner: PublicKey): Publi
         [owner.toBytes(), TOKEN_PROGRAM_ID.toBytes(), mint.toBytes()],
         ASSOCIATED_TOKEN_PROGRAM_ID,
     );
+}
+
+/**
+ * `CreateIdempotent` асоційованого рахунку — один байт даних і шість акаунтів.
+ * Заради цього не заводиться `@solana/spl-token`: розкладка стабільна, а
+ * пакет тягне у бандл ще сотню кілобайт заради однієї інструкції.
+ */
+const ATA_CREATE_IDEMPOTENT = 1;
+
+export function createAtaIdempotentInstruction(
+    payer: PublicKey,
+    mint: PublicKey,
+    owner: PublicKey,
+): TransactionInstruction {
+    return new TransactionInstruction({
+        programId: ASSOCIATED_TOKEN_PROGRAM_ID,
+        keys: [
+            { pubkey: payer, isWritable: true, isSigner: true },
+            { pubkey: associatedTokenAddress(mint, owner), isWritable: true, isSigner: false },
+            { pubkey: owner, isWritable: false, isSigner: false },
+            { pubkey: mint, isWritable: false, isSigner: false },
+            { pubkey: SystemProgram.programId, isWritable: false, isSigner: false },
+            { pubkey: TOKEN_PROGRAM_ID, isWritable: false, isSigner: false },
+        ],
+        data: Buffer.from(Uint8Array.of(ATA_CREATE_IDEMPOTENT)),
+    });
 }
 
 export interface VaultState {
@@ -215,17 +247,65 @@ export function openLadderInstruction(input: DepositInput): TransactionInstructi
     });
 }
 
+async function serialize(
+    owner: PublicKey,
+    instructions: readonly TransactionInstruction[],
+): Promise<Uint8Array> {
+    const { blockhash } = await connection().getLatestBlockhash('confirmed');
+
+    const transaction = new Transaction({ feePayer: owner, recentBlockhash: blockhash });
+    for (const instruction of instructions) {
+        transaction.add(instruction);
+    }
+
+    return transaction.serialize({ requireAllSignatures: false, verifySignatures: false });
+}
+
 /**
  * Транзакція віддається гаманцю несеріалізованою по частинах, а цілим
  * повідомленням: підпис ставить гаманець, тому підписів тут ще немає.
  */
 export async function buildDeposit(input: DepositInput): Promise<Uint8Array> {
-    const { blockhash } = await connection().getLatestBlockhash('confirmed');
+    return serialize(input.owner, [openLadderInstruction(input)]);
+}
 
-    const transaction = new Transaction({
-        feePayer: input.owner,
-        recentBlockhash: blockhash,
-    }).add(openLadderInstruction(input));
+/**
+ * Кастодія vault має існувати до депозиту: `open_ladder` перевіряє рахунок, а
+ * не створює його. Створює будь-хто, тому це робить сам вкладник — але
+ * **окремою транзакцією**.
+ *
+ * Разом вони не їдуть не з економії, а через межу розміру: депозит це вже 31
+ * акаунт і ≈1144 байти, а програма ATA додає і свій акаунт, і по інструкції на
+ * щабель — 1226 байтів при стелі 1232, без місця під ліміт обчислень. Розрив
+ * на дві транзакції лишає депозит тим, чим його міряє SC-002: однією
+ * транзакцією, ≈114 000 CU.
+ */
+export async function missingCustody(
+    vault: PublicKey,
+    mints: readonly PublicKey[],
+): Promise<readonly PublicKey[]> {
+    const addresses = mints.map((mint) => associatedTokenAddress(mint, vault));
+    const infos = await connection().getMultipleAccountsInfo(addresses);
 
-    return transaction.serialize({ requireAllSignatures: false, verifySignatures: false });
+    return mints.filter((_, index) => infos[index] == null);
+}
+
+export async function buildCustodySetup(
+    owner: PublicKey,
+    vault: PublicKey,
+    mints: readonly PublicKey[],
+): Promise<Uint8Array> {
+    return serialize(
+        owner,
+        mints.map((mint) => createAtaIdempotentInstruction(owner, mint, vault)),
+    );
+}
+
+export async function readTokenAccount(
+    mint: PublicKey,
+    owner: PublicKey,
+): Promise<Uint8Array | null> {
+    const info = await connection().getAccountInfo(associatedTokenAddress(mint, owner));
+
+    return info === null ? null : info.data;
 }

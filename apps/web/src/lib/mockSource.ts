@@ -399,11 +399,6 @@ export const REGISTER_PREAMBLE =
 /* Chrome                                                              */
 /* ------------------------------------------------------------------ */
 
-export const BANNER =
-    'Demo — illustrative figures. Not real securities, ratings, or offers, and not connected to any network.';
-
-export const BALANCE_CHIP = 'Balance 2,500.00 USDC';
-
 /** Credit map horizontal domain. */
 export const CHART_X_MIN = '2026-09-01';
 export const CHART_X_MAX = '2028-04-01';

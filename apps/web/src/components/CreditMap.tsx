@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion';
+import { notchLabel } from '@/lib/format';
 import {
     AXIS_GRADE_VALUES,
     CHART_X_MAX,
@@ -6,7 +7,6 @@ import {
     CHART_X_TICKS,
     RATING_MAX,
     RATING_MIN,
-    gradeLabel,
 } from '@/lib/source';
 
 export interface CreditMapMark {
@@ -28,14 +28,25 @@ interface CreditMapProps {
     mini?: boolean;
     /** Draws a vertical rule at this date and shades everything left of it. */
     todayLine?: string;
+    /**
+     * The domain to draw against. The chain catalogue moves — its maturities
+     * and the grades present in it are whatever is deployed — so the composer
+     * derives this from what it read. The screens still on mock figures leave
+     * it out and get the mock's fixed domain.
+     */
+    domain?: {
+        xMin: string;
+        xMax: string;
+        ticks: string[];
+        ratingMin: number;
+        ratingMax: number;
+        axisValues: number[];
+    };
 }
 
 const VB_W = 900;
 
 const days = (date: string) => Date.parse(`${date}T00:00:00Z`);
-
-const X_MIN = days(CHART_X_MIN);
-const X_MAX = days(CHART_X_MAX);
 
 export default function CreditMap({
     marks,
@@ -45,7 +56,15 @@ export default function CreditMap({
     height = 380,
     mini = false,
     todayLine,
+    domain,
 }: CreditMapProps) {
+    const xMin = days(domain?.xMin ?? CHART_X_MIN);
+    const xMax = days(domain?.xMax ?? CHART_X_MAX);
+    const ticks = domain?.ticks ?? CHART_X_TICKS;
+    const ratingMin = domain?.ratingMin ?? RATING_MIN;
+    const ratingMax = domain?.ratingMax ?? RATING_MAX;
+    const axisValues = domain?.axisValues ?? AXIS_GRADE_VALUES;
+
     const pad = mini
         ? { top: 12, right: 168, bottom: 16, left: 16 }
         : { top: 18, right: 172, bottom: 40, left: 84 };
@@ -53,8 +72,8 @@ export default function CreditMap({
     const innerW = VB_W - pad.left - pad.right;
     const innerH = height - pad.top - pad.bottom;
 
-    const x = (date: string) => pad.left + ((days(date) - X_MIN) / (X_MAX - X_MIN)) * innerW;
-    const y = (value: number) => pad.top + ((value - RATING_MIN) / (RATING_MAX - RATING_MIN)) * innerH;
+    const x = (date: string) => pad.left + ((days(date) - xMin) / (xMax - xMin)) * innerW;
+    const y = (value: number) => pad.top + ((value - ratingMin) / (ratingMax - ratingMin)) * innerH;
 
     const floorY = y(floorValue);
     const selected = new Set(selectedIds);
@@ -77,7 +96,7 @@ export default function CreditMap({
                     width="100%"
                     height={height}
                     role="img"
-                    aria-label={`Credit map. Rating against maturity date. Floor at ${gradeLabel(floorValue)}.`}
+                    aria-label={`Credit map. Rating against maturity date. Floor at ${notchLabel(floorValue)}.`}
                     style={{ display: 'block', overflow: 'visible' }}
                 >
                     {/* Out-of-bounds band: everything below the floor */}
@@ -103,7 +122,7 @@ export default function CreditMap({
                     )}
 
                     {/* Horizontal grade rules */}
-                    {AXIS_GRADE_VALUES.map((value) => (
+                    {axisValues.map((value) => (
                         <g key={value}>
                             <line
                                 x1={pad.left}
@@ -123,7 +142,7 @@ export default function CreditMap({
                                     fontFamily="var(--font-body)"
                                     fill="hsl(var(--ink-muted))"
                                 >
-                                    {gradeLabel(value)}
+                                    {notchLabel(value)}
                                 </text>
                             )}
                         </g>
@@ -141,7 +160,7 @@ export default function CreditMap({
 
                     {/* Maturity ticks */}
                     {!mini &&
-                        CHART_X_TICKS.map((tick) => (
+                        ticks.map((tick) => (
                             <g key={tick}>
                                 <line
                                     x1={x(tick)}
@@ -226,7 +245,7 @@ export default function CreditMap({
                                 transition={transition}
                                 strokeWidth={1}
                             >
-                                <title>{`${m.issuer} · ${gradeLabel(m.ratingValue)} · ${m.maturity}`}</title>
+                                <title>{`${m.issuer} · ${notchLabel(m.ratingValue)} · ${m.maturity}`}</title>
                             </motion.circle>
                         );
                     })}

@@ -9,6 +9,7 @@
 import { z } from 'zod'
 
 import { RUNG_COUNT, type RiskProfile } from './profiles'
+import { SCALE_VERSION } from './scale'
 
 export class AccountDecodeError extends Error {
   constructor(message: string) {
@@ -290,6 +291,17 @@ const POSITION = {
   profiles: ['conservative', 'balanced'],
 } as const
 
+/// Дискримінатор і довжина акаунта — це фільтр getProgramAccounts, яким
+/// браузер знаходить каталог, не знаючи жодної адреси наперед (T027). Без
+/// фільтра клієнт тягнув би всі акаунти програми і розбирав би їх сам.
+export interface AccountLayout {
+  readonly discriminator: readonly number[]
+  readonly size: number
+}
+
+export const INSTRUMENT_ACCOUNT: AccountLayout = INSTRUMENT
+export const RATING_RECORD_ACCOUNT: AccountLayout = RATING_RECORD
+
 export function decodeVault(data: Uint8Array): Vault {
   const reader = open('Vault', VAULT.discriminator, VAULT.size, data)
 
@@ -382,4 +394,17 @@ export function decodePosition(data: Uint8Array): Position {
     openedAt: reader.i64(),
     bump: reader.u8(),
   })
+}
+
+// Дзеркало RatingRecord::is_usable. Запис із чужої версії шкали читається так
+// само, як застарілий: та сама цифра під іншою таблицею означала б інший
+// щабель (FR-003, FR-025). Вік рівно у межі ще придатний — інакше клієнт
+// відкидав би кандидата, якого програма приймає, і розкладка до підпису
+// розійшлася б із записаною.
+export function isRatingUsable(
+  rating: Pick<RatingRecord, 'scaleVersion' | 'updatedAt'>,
+  nowTs: bigint,
+  maxAgeSecs: bigint,
+): boolean {
+  return rating.scaleVersion === SCALE_VERSION && nowTs - rating.updatedAt <= maxAgeSecs
 }

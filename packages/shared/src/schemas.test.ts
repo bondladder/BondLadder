@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import rawFixture from '../../../fixtures/accounts.json'
 import { RUNG_MONTHS } from './profiles'
+import { SCALE_VERSION } from './scale'
 import {
   AccountDecodeError,
+  isRatingUsable,
   decodeInstrument,
   decodeIssuerConfig,
   decodeOracleConfig,
@@ -302,5 +304,30 @@ describe('схеми акаунтів', () => {
     const held = decodePosition(bytes(caseNamed('position').data))
 
     expect(positionSchema.safeParse({ ...held, profile: 'aggressive' }).success).toBe(false)
+  })
+})
+
+describe('придатність рейтингу', () => {
+  const rating = { scaleVersion: SCALE_VERSION, updatedAt: 1_772_000_000n }
+  const MAX_AGE = 2_592_000n
+
+  it('приймає свіжий запис своєї версії шкали', () => {
+    expect(isRatingUsable(rating, rating.updatedAt, MAX_AGE)).toBe(true)
+    expect(isRatingUsable(rating, rating.updatedAt + MAX_AGE - 1n, MAX_AGE)).toBe(true)
+  })
+
+  it('приймає вік рівно у межі й відкидає на секунду старший', () => {
+    expect(isRatingUsable(rating, rating.updatedAt + MAX_AGE, MAX_AGE)).toBe(true)
+    expect(isRatingUsable(rating, rating.updatedAt + MAX_AGE + 1n, MAX_AGE)).toBe(false)
+  })
+
+  it('трактує чужу версію шкали так само, як застарілий запис', () => {
+    const foreign = { scaleVersion: SCALE_VERSION + 1, updatedAt: rating.updatedAt }
+
+    expect(isRatingUsable(foreign, foreign.updatedAt, MAX_AGE)).toBe(false)
+  })
+
+  it('відкидає запис із майбутнього не далі, ніж програма', () => {
+    expect(isRatingUsable(rating, rating.updatedAt - 1n, MAX_AGE)).toBe(true)
   })
 })

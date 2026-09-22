@@ -198,21 +198,27 @@ export interface LadderSource {
     BREACH_FLOOR_VALUE: number;
 
     /* Chrome */
-    BANNER: string;
-    BALANCE_CHIP: string;
     CHART_X_MIN: string;
     CHART_X_MAX: string;
     CHART_X_TICKS: string[];
 }
 
 /* ------------------------------------------------------------------ */
-/* The implementation in use                                           */
+/* The implementations in use                                          */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Two of them, for as long as the move to the chain is half done. `chain`
+ * reads the deployed vault, catalogue and ratings and is what the composer
+ * uses (T027); `mockSource` still backs the three screens that have not been
+ * moved yet. A screen may import neither directly — the boundary is this file,
+ * and when the last screen moves the mock simply stops being re-exported.
+ */
+export * from './chain';
 export * from './mockSource';
 
 /**
- * Compile-time proof that the module above covers the contract. A plain
+ * Compile-time proof that the mock still covers the contract. A plain
  * conditional type would quietly collapse to `never`; this one refuses to
  * type-check, which is the point.
  */

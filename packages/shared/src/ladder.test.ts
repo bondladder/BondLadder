@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import fixture from '../../../fixtures/ladder.json'
 import {
   type LadderCandidate,
+  LadderFillError,
   type LadderProposal,
+  fillForShare,
   issuerShareBps,
   proposeLadder,
   rungTargetTs,
@@ -361,5 +363,35 @@ describe('цільовий строк щабля', () => {
 
   it('починається пізніше за момент депозиту, тож погашене не потрапляє в жодне вікно', () => {
     expect(rungWindow(NOW, 3).fromTs).toBeGreaterThan(NOW)
+  })
+})
+
+describe('наповнення щабля', () => {
+  it('купує цілі одиниці так само, як спільний фікстур', () => {
+    for (const entry of fixture.fill) {
+      const fill = fillForShare(BigInt(entry.shareMicro), BigInt(entry.priceMicro))
+
+      expect(fill.units.toString(), entry.case).toBe(entry.units)
+      expect(fill.spentMicro.toString(), entry.case).toBe(entry.spentMicro)
+    }
+  })
+
+  it('ніколи не витрачає більше за частку', () => {
+    for (const entry of fixture.fill) {
+      const fill = fillForShare(BigInt(entry.shareMicro), BigInt(entry.priceMicro))
+
+      expect(fill.spentMicro, entry.case).toBeLessThanOrEqual(BigInt(entry.shareMicro))
+      expect(fill.units * BigInt(entry.priceMicro), entry.case).toBe(fill.spentMicro)
+    }
+  })
+
+  it('віддає нуль одиниць, а не відмову, коли частка менша за ціну', () => {
+    expect(fillForShare(999n, 1_000n)).toEqual({ units: 0n, spentMicro: 0n })
+  })
+
+  it('відмовляє на ціні, якої маршрут не приймає', () => {
+    expect(() => fillForShare(1_000n, 0n)).toThrow(LadderFillError)
+    expect(() => fillForShare(1_000n, -1n)).toThrow(LadderFillError)
+    expect(() => fillForShare(-1n, 1_000n)).toThrow(LadderFillError)
   })
 })

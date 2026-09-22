@@ -1,55 +1,169 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { type RiskProfile, maxIssuerBps, worstAllowedNotch } from '@bondladder/shared';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import CreditMap from '@/components/CreditMap';
-import { usdc } from '@/lib/format';
 import {
-    BONDS,
-    DEPOSIT,
-    PROFILES,
-    PROFILE_ORDER,
-    RATING_MAX,
-    RATING_MIN,
-    REFUSALS,
-    bondId,
-    eligibleIssuers,
-    gradeLabel,
-    sheetForFloor,
-    tooFewIssuersRefusal,
-    type ProfileKey,
+    maturityDate,
+    microFromUsdc,
+    notchLabel,
+    percentFromBps,
+    termLabel,
+    usdcFromMicro,
+    weightedNotchLabel,
+} from '@/lib/format';
+import {
+    type Catalogue,
+    type Proposal,
+    chartDomain,
+    explorerTx,
+    loadCatalogue,
+    openPosition,
+    proposeDeposit,
+    ratingAxis,
+    readUsdcBalance,
 } from '@/lib/source';
+import { useWallet } from '@/lib/walletContext';
+
+const PROFILE_NAMES: Record<RiskProfile, string> = {
+    conservative: 'Conservative',
+    balanced: 'Balanced',
+};
+
+const PROFILE_ORDER: readonly RiskProfile[] = ['conservative', 'balanced'];
+
+type Submission =
+    | { kind: 'idle' }
+    | { kind: 'custody' }
+    | { kind: 'signing' }
+    | { kind: 'done'; signature: string }
+    | { kind: 'failed'; reason: string };
+
+interface Loaded {
+    readonly catalogue: Catalogue;
+    readonly nowTs: bigint;
+}
+
+function reason(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
 
 export default function Compose() {
-    const navigate = useNavigate();
-    const [profile, setProfile] = useState<ProfileKey>('conservative');
-    const [floor, setFloor] = useState<number>(PROFILES.conservative.floorValue);
-    const [amountText, setAmountText] = useState<string>('1000.00');
+    const { connected, sign } = useWallet();
+    const [profile, setProfile] = useState<RiskProfile>('conservative');
+    const [amountText, setAmountText] = useState('1000.00');
+    const [loaded, setLoaded] = useState<Loaded | null>(null);
+    const [loadFailure, setLoadFailure] = useState<string | null>(null);
+    const [balanceMicro, setBalanceMicro] = useState<bigint | null>(null);
+    const [submission, setSubmission] = useState<Submission>({ kind: 'idle' });
 
-    const chooseProfile = (key: ProfileKey) => {
-        setProfile(key);
-        setFloor(PROFILES[key].floorValue);
-    };
+    // The moment the catalogue was read is the moment the maturity windows are
+    // measured from, so it is taken once beside the read and not on each render.
+    useEffect(() => {
+        let alive = true;
+        const nowTs = BigInt(Math.floor(Date.now() / 1000));
 
-    const parsed = Number.parseFloat(amountText);
-    const amount = Number.isFinite(parsed) ? parsed : 0;
+        loadCatalogue(nowTs)
+            .then((catalogue) => alive && setLoaded({ catalogue, nowTs }))
+            .catch((failure: unknown) => alive && setLoadFailure(reason(failure)));
 
-    const sheet = sheetForFloor(floor, profile);
+        return () => {
+            alive = false;
+        };
+    }, []);
 
-    let refusal: string | null = null;
-    if (!Number.isFinite(parsed) || amount < DEPOSIT.minimum) refusal = REFUSALS.belowMinimum;
-    else if (amount > DEPOSIT.maximum) refusal = REFUSALS.aboveMaximum;
-    else if (!sheet) refusal = tooFewIssuersRefusal(floor);
+    useEffect(() => {
+        if (loaded === null || connected === null) {
+            setBalanceMicro(null);
+            return;
+        }
 
-    const holdings = !refusal && sheet ? sheet.holdings : [];
-    const factor = amount / 1000;
+        let alive = true;
+        readUsdcBalance(loaded.catalogue, connected.address)
+            .then((balance) => alive && setBalanceMicro(balance))
+            .catch(() => alive && setBalanceMicro(null));
 
-    const selectedIds = holdings.map((h) => bondId(h.issuer, h.maturity));
+        return () => {
+            alive = false;
+        };
+    }, [loaded, connected]);
 
-    const floorCaption =
-        floor === PROFILES[profile].floorValue
-            ? `${PROFILES[profile].name} floor — ${gradeLabel(floor)}`
-            : `Rating floor — ${gradeLabel(floor)}`;
+    const depositMicro = microFromUsdc(amountText);
 
-    const eligibleCount = eligibleIssuers(floor).length;
+    const outcome = useMemo(() => {
+        if (loaded === null || depositMicro === null) {
+            return null;
+        }
+
+        return proposeDeposit(loaded.catalogue, profile, depositMicro, loaded.nowTs);
+    }, [loaded, depositMicro, profile]);
+
+    const submit = useCallback(
+        async (catalogue: Catalogue, proposal: Proposal, deposit: bigint) => {
+            if (connected === null) {
+                return;
+            }
+
+            try {
+                const signature = await openPosition(
+                    catalogue,
+                    proposal,
+                    profile,
+                    deposit,
+                    connected.address,
+                    sign,
+                    (step) => setSubmission({ kind: step === 'custody' ? 'custody' : 'signing' }),
+                );
+
+                setSubmission({ kind: 'done', signature });
+            } catch (failure) {
+                setSubmission({ kind: 'failed', reason: reason(failure) });
+            }
+        },
+        [connected, profile, sign],
+    );
+
+    const floorNotch = worstAllowedNotch(profile);
+    const entries = loaded?.catalogue.entries ?? [];
+    const selected = outcome?.ok === true ? outcome.proposal.sheet.rows : [];
+    const selectedIds = selected.map((row) => row.entry.mint);
+
+    const domain = useMemo(() => {
+        const nowTs = loaded?.nowTs ?? BigInt(Math.floor(Date.now() / 1000));
+
+        return {
+            ...chartDomain(
+                entries.map((entry) => entry.maturityTs),
+                nowTs,
+            ),
+            ...ratingAxis(
+                entries.map((entry) => entry.notch),
+                floorNotch,
+            ),
+        };
+    }, [entries, loaded, floorNotch]);
+
+    if (loadFailure !== null) {
+        return (
+            <section>
+                <h1 className="font-display text-[26px] leading-tight">The chain is out of reach</h1>
+                <p className="mt-4 max-w-[68ch] text-[15px] leading-relaxed">{loadFailure}</p>
+                <p className="mt-3 max-w-[68ch] text-[13px] leading-relaxed text-ink-muted">
+                    Nothing has been moved. The catalogue, the ratings and the vault are all read
+                    from the network before anything is offered.
+                </p>
+            </section>
+        );
+    }
+
+    if (loaded === null) {
+        return <p className="text-[13px] text-ink-muted">Reading the vault, the catalogue and the ratings…</p>;
+    }
+
+    const sheet = outcome?.ok === true ? outcome.proposal.sheet : null;
+    const refusal = outcome !== null && !outcome.ok ? outcome.refusal : null;
+    const malformed = depositMicro === null ? 'That is not an amount of USDC.' : null;
+    const shortOfBalance =
+        balanceMicro !== null && depositMicro !== null && depositMicro > balanceMicro;
 
     return (
         <div className="space-y-10">
@@ -61,15 +175,25 @@ export default function Compose() {
                     </p>
                 </div>
                 <CreditMap
-                    marks={BONDS}
+                    marks={entries.map((entry) => ({
+                        id: entry.mint,
+                        issuer: entry.issuerId,
+                        ratingValue: entry.notch,
+                        maturity: maturityDate(entry.maturityTs),
+                    }))}
                     selectedIds={selectedIds}
-                    floorValue={floor}
-                    floorCaption={floorCaption}
+                    floorValue={floorNotch}
+                    floorCaption={`${PROFILE_NAMES[profile]} floor — ${notchLabel(floorNotch)}`}
                     height={400}
+                    domain={domain}
                 />
                 <p className="mt-3 max-w-[62ch] text-[12px] leading-relaxed text-ink-muted">
-                    Filled marks are the position: five issuers, one at each maturity, joined left to right. Hollow
-                    marks sit below the floor and are never bought.
+                    Filled marks are the position: five issuers, one at each maturity, joined left to
+                    right. Hollow marks sit below the floor and are never bought.
+                </p>
+                <p className="figure mt-2 text-[11px] text-ink-faint">
+                    {entries.length} of {loaded.catalogue.instrumentCount} instruments carry a usable
+                    rating today
                 </p>
             </section>
 
@@ -77,71 +201,118 @@ export default function Compose() {
             <section className="border-y border-rule-strong">
                 <div className="flex flex-col gap-8 py-6 lg:flex-row lg:items-end lg:justify-between">
                     <div>
-                        <label
-                            htmlFor="amount"
-                            className="col-label mb-2 block"
-                        >
+                        <label htmlFor="amount" className="col-label mb-2 block">
                             Amount
                         </label>
                         <div className="flex items-baseline gap-2">
                             <input
                                 id="amount"
-                                type="number"
-                                step="0.01"
+                                type="text"
                                 inputMode="decimal"
                                 value={amountText}
-                                onChange={(e) => setAmountText(e.target.value)}
+                                onChange={(event) => setAmountText(event.target.value)}
                                 className="figure w-[9.5rem] border-b border-ink bg-transparent pb-1 text-right font-display text-[22px] outline-none focus:border-mark"
                             />
                             <span className="text-[13px] text-ink-muted">USDC</span>
                         </div>
-                        <p className="figure mt-2 text-[11px] text-ink-faint">{DEPOSIT.walletBalance}</p>
+                        <p className="figure mt-2 text-[11px] text-ink-faint">
+                            {balanceMicro === null
+                                ? 'Connect a wallet to see your balance'
+                                : `Wallet balance ${usdcFromMicro(balanceMicro)}`}
+                        </p>
                     </div>
 
                     <div>
                         <span className="col-label mb-2 block">Profile</span>
                         <div className="inline-flex border border-ink">
-                            {PROFILE_ORDER.map((key) => {
-                                const active = key === profile;
-                                return (
-                                    <button
-                                        key={key}
-                                        type="button"
-                                        onClick={() => chooseProfile(key)}
-                                        className={[
-                                            'px-5 py-2 text-[13px] transition-colors duration-200',
-                                            active ? 'bg-ink text-paper' : 'bg-transparent text-ink-muted hover:text-ink',
-                                        ].join(' ')}
-                                    >
-                                        {PROFILES[key].name}
-                                    </button>
-                                );
-                            })}
+                            {PROFILE_ORDER.map((key) => (
+                                <button
+                                    key={key}
+                                    type="button"
+                                    onClick={() => setProfile(key)}
+                                    className={[
+                                        'px-5 py-2 text-[13px] transition-colors duration-200',
+                                        key === profile
+                                            ? 'bg-ink text-paper'
+                                            : 'bg-transparent text-ink-muted hover:text-ink',
+                                    ].join(' ')}
+                                >
+                                    {PROFILE_NAMES[key]}
+                                </button>
+                            ))}
                         </div>
                         <p className="figure mt-2 text-[11px] text-ink-faint">
-                            Floor {gradeLabel(PROFILES[profile].floorValue)} · max {PROFILES[profile].maxIssuerShare} of
-                            one issuer
+                            Floor {notchLabel(worstAllowedNotch(profile))} · max{' '}
+                            {percentFromBps(maxIssuerBps(profile))} of one issuer
                         </p>
                     </div>
 
                     <div className="lg:text-right">
                         <button
                             type="button"
-                            disabled={Boolean(refusal)}
-                            onClick={() => navigate('/position')}
+                            disabled={
+                                sheet === null ||
+                                connected === null ||
+                                shortOfBalance ||
+                                submission.kind === 'custody' ||
+                                submission.kind === 'signing'
+                            }
+                            onClick={() => {
+                                if (outcome?.ok === true && depositMicro !== null) {
+                                    void submit(loaded.catalogue, outcome.proposal, depositMicro);
+                                }
+                            }}
                             className="border border-ink bg-ink px-7 py-2.5 text-[13px] tracking-wide text-paper transition-opacity duration-200 hover:opacity-85 disabled:cursor-not-allowed disabled:border-rule-strong disabled:bg-transparent disabled:text-ink-faint disabled:opacity-100"
                         >
-                            Open position
+                            {submission.kind === 'custody'
+                                ? 'Preparing custody…'
+                                : submission.kind === 'signing'
+                                  ? 'Waiting for your wallet…'
+                                  : 'Open position'}
                         </button>
+                        <p className="figure mt-2 text-[11px] text-ink-faint lg:text-right">
+                            {connected === null
+                                ? 'Connect a wallet in the header first'
+                                : shortOfBalance
+                                  ? 'More than this wallet holds'
+                                  : 'One transaction, signed by you'}
+                        </p>
                     </div>
                 </div>
             </section>
 
+            {submission.kind === 'done' && (
+                <section className="border-b border-rule pb-6">
+                    <h2 className="section-heading">Position opened</h2>
+                    <p className="max-w-[68ch] text-[15px] leading-relaxed">
+                        The ladder was opened in one transaction.{' '}
+                        <a
+                            href={explorerTx(submission.signature)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="border-b border-mark text-mark"
+                        >
+                            See it on the explorer
+                        </a>
+                        , or read it back on the <Link to="/position" className="border-b border-rule-strong">statement</Link>.
+                    </p>
+                </section>
+            )}
+
+            {submission.kind === 'failed' && (
+                <section className="border-b border-rule pb-6">
+                    <h2 className="section-heading">Not opened</h2>
+                    <p className="max-w-[68ch] text-[15px] leading-relaxed">{submission.reason}</p>
+                </section>
+            )}
+
             {/* Term sheet or refusal */}
-            {refusal ? (
+            {sheet === null ? (
                 <section>
                     <h2 className="section-heading">Not opened</h2>
-                    <p className="max-w-[68ch] border-b border-rule py-6 text-[15px] leading-relaxed">{refusal}</p>
+                    <p className="max-w-[68ch] border-b border-rule py-6 text-[15px] leading-relaxed">
+                        {malformed ?? refusal}
+                    </p>
                 </section>
             ) : (
                 <section>
@@ -156,22 +327,40 @@ export default function Compose() {
                                 <th className="col-label py-2 text-left">Source</th>
                                 <th className="col-label py-2 text-left">Maturity</th>
                                 <th className="col-label py-2 text-left">Term</th>
+                                <th className="col-label py-2 text-right">Coupon</th>
+                                <th className="col-label py-2 text-right">Unit price</th>
+                                <th className="col-label py-2 text-right">Units</th>
                                 <th className="col-label py-2 text-right">Amount</th>
-                                <th className="col-label py-2 text-right">Share</th>
-                                <th className="col-label py-2 text-right">Coupon to maturity</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {holdings.map((h) => (
-                                <tr key={h.issuer} className="border-b border-rule">
-                                    <td className="py-3 pr-4 font-display text-[15px]">{h.issuer}</td>
-                                    <td className="figure py-3 pr-4">{gradeLabel(h.ratingValue)}</td>
-                                    <td className="py-3 pr-4 text-[12px] tracking-wide text-ink-muted">{h.source}</td>
-                                    <td className="figure py-3 pr-4">{h.maturity}</td>
-                                    <td className="py-3 pr-4 text-ink-muted">{h.term}</td>
-                                    <td className="figure py-3 pl-4 text-right">{usdc(h.amount * factor)}</td>
-                                    <td className="figure py-3 pl-4 text-right">{h.share}</td>
-                                    <td className="figure py-3 pl-4 text-right">{usdc(h.couponNumber * factor)}</td>
+                            {sheet.rows.map((row) => (
+                                <tr key={row.entry.mint} className="border-b border-rule">
+                                    <td className="py-3 pr-4 font-display text-[15px]">
+                                        {row.entry.issuerId}
+                                    </td>
+                                    <td className="figure py-3 pr-4">{notchLabel(row.entry.notch)}</td>
+                                    <td className="py-3 pr-4 text-[12px] tracking-wide text-ink-muted">
+                                        {row.entry.agencyCode}
+                                    </td>
+                                    <td className="figure py-3 pr-4">
+                                        {maturityDate(row.entry.maturityTs)}
+                                    </td>
+                                    <td className="py-3 pr-4 text-ink-muted">
+                                        {termLabel(row.rungMonths)}
+                                    </td>
+                                    <td className="figure py-3 pl-4 text-right">
+                                        {percentFromBps(row.entry.couponBps)}
+                                    </td>
+                                    <td className="figure py-3 pl-4 text-right">
+                                        {usdcFromMicro(row.entry.priceMicro)}
+                                    </td>
+                                    <td className="figure py-3 pl-4 text-right">
+                                        {row.units.toString()}
+                                    </td>
+                                    <td className="figure py-3 pl-4 text-right">
+                                        {usdcFromMicro(row.spentMicro)}
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>
@@ -179,22 +368,28 @@ export default function Compose() {
 
                     {/* Stacked definition lists */}
                     <div className="md:hidden">
-                        {holdings.map((h) => (
-                            <div key={h.issuer} className="border-b border-rule py-4">
+                        {sheet.rows.map((row) => (
+                            <div key={row.entry.mint} className="border-b border-rule py-4">
                                 <div className="mb-2 flex items-baseline justify-between gap-3">
-                                    <span className="font-display text-[16px]">{h.issuer}</span>
-                                    <span className="figure text-[14px]">{gradeLabel(h.ratingValue)}</span>
+                                    <span className="font-display text-[16px]">{row.entry.issuerId}</span>
+                                    <span className="figure text-[14px]">
+                                        {notchLabel(row.entry.notch)}
+                                    </span>
                                 </div>
                                 <dl className="space-y-1 text-[13px]">
                                     {[
-                                        ['Source', h.source],
-                                        ['Maturity', h.maturity],
-                                        ['Term', h.term],
-                                        ['Amount', usdc(h.amount * factor)],
-                                        ['Share', h.share],
-                                        ['Coupon to maturity', usdc(h.couponNumber * factor)],
+                                        ['Source', row.entry.agencyCode],
+                                        ['Maturity', maturityDate(row.entry.maturityTs)],
+                                        ['Term', termLabel(row.rungMonths)],
+                                        ['Coupon', percentFromBps(row.entry.couponBps)],
+                                        ['Unit price', usdcFromMicro(row.entry.priceMicro)],
+                                        ['Units', row.units.toString()],
+                                        ['Amount', usdcFromMicro(row.spentMicro)],
                                     ].map(([label, value]) => (
-                                        <div key={label} className="flex items-baseline justify-between gap-4">
+                                        <div
+                                            key={label}
+                                            className="flex items-baseline justify-between gap-4"
+                                        >
                                             <dt className="text-ink-faint">{label}</dt>
                                             <dd className="figure">{value}</dd>
                                         </div>
@@ -204,40 +399,20 @@ export default function Compose() {
                         ))}
                     </div>
 
-                    {sheet && (
-                        <p className="figure mt-4 text-[13px] leading-relaxed text-ink-muted">
-                            Total {usdc(amount)} · Coupon to maturity {usdc(sheet.couponTotal * factor)} · Weighted
-                            rating {sheet.weightedRating} · {sheet.issuerNote}
+                    <p className="figure mt-4 text-[13px] leading-relaxed text-ink-muted">
+                        Deposit {usdcFromMicro(sheet.depositMicro)} · Invested{' '}
+                        {usdcFromMicro(sheet.investedMicro)} · Weighted rating{' '}
+                        {weightedNotchLabel(sheet.weightedNotch)} · {sheet.issuerCount} issuers, none
+                        above {percentFromBps(sheet.largestIssuerBps)}
+                    </p>
+                    {sheet.returnedMicro > 0n && (
+                        <p className="figure mt-1 text-[13px] leading-relaxed text-ink-muted">
+                            {usdcFromMicro(sheet.returnedMicro)} stays in your wallet: the route buys
+                            whole units, and that tail does not reach the price of one.
                         </p>
                     )}
                 </section>
             )}
-
-            {/* Demo controls */}
-            <section className="border-t border-rule-strong pt-5">
-                <h2 className="col-label mb-4">Demo controls</h2>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-8">
-                    <label htmlFor="floor" className="w-40 shrink-0 text-[13px] text-ink-muted">
-                        Rating floor
-                    </label>
-                    <input
-                        id="floor"
-                        type="range"
-                        className="paper-range max-w-md"
-                        min={RATING_MIN}
-                        max={RATING_MAX}
-                        step={1}
-                        value={floor}
-                        onChange={(e) => setFloor(Number(e.target.value))}
-                    />
-                    <span className="figure shrink-0 text-[13px]">
-                        {gradeLabel(floor)} · {eligibleCount} of 9 issuers eligible
-                    </span>
-                </div>
-                <p className="figure mt-2 text-[11px] text-ink-faint">
-                    {gradeLabel(RATING_MIN)} → {gradeLabel(RATING_MAX)}
-                </p>
-            </section>
         </div>
     );
 }

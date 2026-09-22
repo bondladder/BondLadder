@@ -37,7 +37,7 @@ import {
   type LadderCandidate,
   type RatingRecord,
   type RiskProfile,
-  SCALE_VERSION,
+  isRatingUsable,
   decodeVault,
   profileSeedByte,
   proposeLadder,
@@ -131,12 +131,6 @@ export function custodyAddress(mint: PublicKey, vault: PublicKey): PublicKey {
   return getAssociatedTokenAddressSync(mint, vault, true)
 }
 
-/// Дзеркало RatingRecord::is_usable: чужа версія шкали трактується так само,
-/// як застарілий запис, а вік рівно у межі ще придатний.
-function isUsable(rating: RatingRecord, nowTs: bigint, maxAgeSecs: bigint): boolean {
-  return rating.scaleVersion === SCALE_VERSION && nowTs - rating.updatedAt <= maxAgeSecs
-}
-
 /// Кандидат для підбору складається з двох акаунтів, і жоден із них не
 /// гарантований: каталог могло не дописати, а рейтинг — протухнути. Те, що
 /// програма все одно відхилить, до пропозиції не потрапляє.
@@ -151,7 +145,7 @@ export function toCandidates(
     if (instrument === null || rating === null) {
       continue
     }
-    if (rating.instrumentMint !== instrument.mint || !isUsable(rating, nowTs, maxAgeSecs)) {
+    if (rating.instrumentMint !== instrument.mint || !isRatingUsable(rating, nowTs, maxAgeSecs)) {
       continue
     }
 

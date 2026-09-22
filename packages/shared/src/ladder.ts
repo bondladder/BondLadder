@@ -15,10 +15,23 @@ import {
   admitsRating,
 } from './profiles'
 
+export class LadderFillError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'LadderFillError'
+  }
+}
+
 export interface LadderCandidate {
   readonly issuerId: string
   readonly maturityTs: bigint
   readonly notch: number
+}
+
+/** Скільки одиниць дала частка щабля і скільки з неї пішло насправді. */
+export interface LadderFill {
+  readonly units: bigint
+  readonly spentMicro: bigint
 }
 
 export interface RungShare {
@@ -93,6 +106,27 @@ export function splitDeposit(depositMicro: bigint): readonly RungShare[] {
     rungMonths,
     amountMicro: index === RUNG_COUNT - 1 ? depositMicro - share * BigInt(RUNG_COUNT - 1) : share,
   }))
+}
+
+// Дзеркало mock_issuer::instructions::mint_for_usdc::fill_for_share, звірене з
+// fixtures/ladder.json. Маршрут купує цілі одиниці, тому частка витрачається не
+// вся: хвіст менший за ціну одиниці лишається вкладнику й до позиції не
+// потрапляє (FR-032). Без цього екран обіцяв би вкладення всієї суми.
+//
+// Нуль одиниць — не помилка, а відповідь «частки не вистачає на одиницю»:
+// відмовити має екран, показавши чому. Ціна ж нулем бути не може — на ній
+// відмовляє сам маршрут, і мовчазний поділ на нуль тут був би гіршим.
+export function fillForShare(shareMicro: bigint, priceMicro: bigint): LadderFill {
+  if (priceMicro <= 0n) {
+    throw new LadderFillError(`ціна ${priceMicro} — маршрут такий інструмент не продає`)
+  }
+  if (shareMicro < 0n) {
+    throw new LadderFillError(`частка ${shareMicro} від’ємна`)
+  }
+
+  const spentMicro = shareMicro - (shareMicro % priceMicro)
+
+  return { units: spentMicro / priceMicro, spentMicro }
 }
 
 // Вниз, як і решта арифметики: неподільний залишок робить найдовший щабель

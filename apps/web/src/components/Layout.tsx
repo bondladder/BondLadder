@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { BALANCE_CHIP, BANNER } from '@/lib/source';
+import { shortAddress, useWallet } from '@/lib/walletContext';
 
 const NAV = [
     { to: '/', label: 'Compose', end: true },
@@ -7,6 +7,54 @@ const NAV = [
     { to: '/exit', label: 'Redemption', end: false },
     { to: '/history', label: 'Register', end: false },
 ];
+
+// Two claims, because the app is now half on the chain: Compose reads the live
+// catalogue and opens real positions, the other three screens are still the
+// illustrative figures they were built with.
+const BANNER =
+    'Demo on Solana devnet. Compose reads the deployed catalogue and opens real positions with demo USDC; ' +
+    'Statement, Redemption and Register are still illustrative figures. Not real securities, ratings, or offers.';
+
+function WalletChip() {
+    const { wallets, connected, busy, disconnect, connect } = useWallet();
+
+    if (connected !== null) {
+        return (
+            <button
+                type="button"
+                onClick={() => void disconnect()}
+                title={connected.address}
+                className="figure border border-rule-strong px-2.5 py-1 text-[11px] tracking-wide text-ink-muted transition-colors duration-200 hover:text-ink"
+            >
+                {connected.name} · {shortAddress(connected.address)}
+            </button>
+        );
+    }
+
+    if (wallets.length === 0) {
+        return (
+            <span className="figure border border-rule px-2.5 py-1 text-[11px] tracking-wide text-ink-faint">
+                No Solana wallet found
+            </span>
+        );
+    }
+
+    return (
+        <span className="flex flex-wrap items-baseline gap-2">
+            {wallets.map((wallet) => (
+                <button
+                    key={wallet.name}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void connect(wallet.name)}
+                    className="figure border border-rule-strong px-2.5 py-1 text-[11px] tracking-wide text-ink-muted transition-colors duration-200 hover:text-ink disabled:text-ink-faint"
+                >
+                    Connect {wallet.name}
+                </button>
+            ))}
+        </span>
+    );
+}
 
 export default function Layout() {
     return (
@@ -41,9 +89,7 @@ export default function Layout() {
                             ))}
                         </nav>
                     </div>
-                    <span className="figure border border-rule-strong px-2.5 py-1 text-[11px] tracking-wide text-ink-muted">
-                        {BALANCE_CHIP}
-                    </span>
+                    <WalletChip />
                 </div>
             </header>
 
