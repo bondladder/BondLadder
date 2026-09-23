@@ -16,6 +16,7 @@
  */
 
 import {
+    accrueFee,
     decodeInstrument,
     decodeOracleConfig,
     decodeRatingRecord,
@@ -28,6 +29,7 @@ import {
     type LadderAllocation,
     type LadderCandidate,
     maxIssuerBps,
+    type Position,
     proposeLadder,
     RATING_RECORD_ACCOUNT,
     type RatingRecord,
@@ -46,6 +48,7 @@ import {
     oracleConfigAddress,
     ProgramClientError,
     ratingAddress,
+    readPosition,
     readTokenAccount,
     readVault,
     type VaultState,
@@ -462,5 +465,211 @@ export async function openPosition(
                 custody: associatedTokenAddress(mint, vault.address),
             })),
         }),
+    );
+}
+
+/* ------------------------------------------------------------------ */
+/* The held position                                                   */
+/* ------------------------------------------------------------------ */
+
+/** One rung of a held position, valued at what the issuer prices it today. */
+export interface StatementRow {
+    readonly rungMonths: number;
+    readonly mint: string;
+    readonly issuerId: string;
+    /** `null` together with `notch`: the oracle has nothing usable to say today. */
+    readonly agencyCode: string | null;
+    readonly entryNotch: number;
+    readonly notch: number | null;
+    readonly maturityTs: bigint;
+    readonly couponBps: number;
+    readonly units: bigint;
+    readonly entryPriceMicro: bigint;
+    readonly priceMicro: bigint;
+    /** Units at the price the route paid — the rung's share of the principal. */
+    readonly costMicro: bigint;
+    readonly valueMicro: bigint;
+    readonly remainingSeconds: bigint;
+    readonly flagged: boolean;
+}
+
+export interface PositionStatement {
+    readonly profile: RiskProfile;
+    readonly rows: readonly StatementRow[];
+    readonly openedAt: bigint;
+    readonly heldSeconds: bigint;
+    readonly principalMicro: bigint;
+    readonly grossValueMicro: bigint;
+    /** Accrued and not yet taken: a liability, shown on a line of its own. */
+    readonly feeAccruedMicro: bigint;
+    readonly feeBps: number;
+    readonly netValueMicro: bigint;
+    /** `null` when any rung is unrated — see `unratedCount`. */
+    readonly weightedNotch: number | null;
+    readonly unratedCount: number;
+    readonly averageRemainingSeconds: bigint;
+    readonly nextMaturity: StatementRow | null;
+}
+
+export interface StatementInput {
+    readonly position: Position;
+    readonly vault: Vault;
+    readonly instruments: readonly Instrument[];
+    readonly ratings: readonly RatingRecord[];
+    readonly nowTs: bigint;
+    readonly maxAgeSecs: bigint;
+}
+
+function sinceOrZero(nowTs: bigint, then: bigint): bigint {
+    return nowTs > then ? nowTs - then : 0n;
+}
+
+/**
+ * What the position is worth and what it costs to hold (FR-011, FR-030).
+ *
+ * Every figure is read back rather than remembered: the units come from the
+ * position the program wrote, the price from the issuer today, the grade from
+ * the oracle today. The entry price and the entry grade travel beside them, so
+ * a change in either is visible rather than averaged away.
+ *
+ * The fee is the debt the program will charge at the first operation that
+ * touches the position (FR-020) — what it has already written down, plus what
+ * has accrued since, by the same arithmetic the program uses. It is subtracted
+ * from the value rather than reported next to it, because FR-030 asks every
+ * other figure on the dashboard to be net of it.
+ */
+export function positionStatement(input: StatementInput): PositionStatement {
+    const { position, vault, nowTs, maxAgeSecs } = input;
+    const instrumentByMint = new Map(input.instruments.map((instrument) => [instrument.mint, instrument]));
+    const ratingByMint = new Map(input.ratings.map((record) => [record.instrumentMint, record]));
+
+    const rows: StatementRow[] = [];
+    let grossValueMicro = 0n;
+    let notchWeighted = 0n;
+    let remainingWeighted = 0n;
+    let unratedCount = 0;
+
+    for (const rung of position.rungs) {
+        const instrument = instrumentByMint.get(rung.instrument);
+        if (instrument === undefined) {
+            throw new ProgramClientError(`the instrument behind ${rung.instrument} could not be read`);
+        }
+
+        const record = ratingByMint.get(rung.instrument);
+        const rated = record !== undefined && isRatingUsable(record, nowTs, maxAgeSecs);
+        if (!rated) {
+            unratedCount += 1;
+        }
+
+        const valueMicro = rung.amount * instrument.priceMicro;
+        const remainingSeconds = sinceOrZero(rung.maturityTs, nowTs);
+
+        grossValueMicro += valueMicro;
+        remainingWeighted += remainingSeconds * valueMicro;
+        if (rated && record !== undefined) {
+            notchWeighted += BigInt(record.notch) * valueMicro;
+        }
+
+        rows.push({
+            rungMonths: rung.targetMonths,
+            mint: rung.instrument,
+            issuerId: instrument.issuerId,
+            agencyCode: rated && record !== undefined ? record.agencyCode : null,
+            entryNotch: rung.entryNotch,
+            notch: rated && record !== undefined ? record.notch : null,
+            maturityTs: rung.maturityTs,
+            couponBps: instrument.couponBps,
+            units: rung.amount,
+            entryPriceMicro: rung.entryPriceMicro,
+            priceMicro: instrument.priceMicro,
+            costMicro: rung.amount * rung.entryPriceMicro,
+            valueMicro,
+            remainingSeconds,
+            flagged: rung.flagged,
+        });
+    }
+
+    const feeAccruedMicro =
+        position.feeAccrued + accrueFee(grossValueMicro, vault.feeBps, sinceOrZero(nowTs, position.lastFeeTs));
+
+    const nextMaturity = rows.reduce<StatementRow | null>(
+        (earliest, row) => (earliest === null || row.maturityTs < earliest.maturityTs ? row : earliest),
+        null,
+    );
+
+    return {
+        profile: position.profile,
+        rows,
+        openedAt: position.openedAt,
+        heldSeconds: sinceOrZero(nowTs, position.openedAt),
+        principalMicro: position.principalUsdc,
+        grossValueMicro,
+        feeAccruedMicro,
+        feeBps: vault.feeBps,
+        netValueMicro: grossValueMicro > feeAccruedMicro ? grossValueMicro - feeAccruedMicro : 0n,
+        // Weighting by value is only honest over rungs that have a value and a
+        // grade. One unrated rung and the portfolio's grade is unknown, not
+        // the average of the rest (FR-025).
+        weightedNotch:
+            unratedCount > 0 || grossValueMicro === 0n ? null : Number(notchWeighted) / Number(grossValueMicro),
+        unratedCount,
+        averageRemainingSeconds: grossValueMicro === 0n ? 0n : remainingWeighted / grossValueMicro,
+        nextMaturity,
+    };
+}
+
+/** Both PDAs a wallet can hold, because a wallet may have opened under either. */
+const STATEMENT_PROFILES: readonly RiskProfile[] = ['conservative', 'balanced'];
+
+/**
+ * Every position this wallet holds — none, one, or one per profile.
+ *
+ * Two round trips deep, and no program scan: a position names its own five
+ * instruments, so the accounts behind it are derived rather than searched for.
+ * That is what keeps the first screen inside SC-008 where the composer needs a
+ * catalogue-wide scan.
+ */
+export async function readStatements(owner: string, nowTs: bigint): Promise<readonly PositionStatement[]> {
+    const ownerKey = new PublicKey(owner);
+    const [vault, held] = await Promise.all([
+        readVault(),
+        Promise.all(STATEMENT_PROFILES.map((profile) => readPosition(ownerKey, profile))),
+    ]);
+
+    const positions = held.filter((position): position is Position => position !== null);
+    if (positions.length === 0) {
+        return [];
+    }
+
+    const issuerProgram = new PublicKey(vault.state.issuerProgram);
+    const ratingOracle = new PublicKey(vault.state.ratingOracle);
+    const mints = [...new Set(positions.flatMap((position) => position.rungs.map((rung) => rung.instrument)))];
+
+    const infos = await connection().getMultipleAccountsInfo([
+        oracleConfigAddress(ratingOracle),
+        ...mints.map((mint) => instrumentAddress(new PublicKey(mint), issuerProgram)),
+        ...mints.map((mint) => ratingAddress(new PublicKey(mint), ratingOracle)),
+    ]);
+
+    const oracle = infos[0];
+    if (oracle == null) {
+        throw new ProgramClientError('the rating oracle is not initialised');
+    }
+
+    const instruments = mints.flatMap((_, index) => {
+        const info = infos[1 + index];
+
+        return info == null ? [] : [decodeInstrument(info.data)];
+    });
+    const ratings = mints.flatMap((_, index) => {
+        const info = infos[1 + mints.length + index];
+
+        return info == null ? [] : [decodeRatingRecord(info.data)];
+    });
+
+    const { maxAgeSecs } = decodeOracleConfig(oracle.data);
+
+    return positions.map((position) =>
+        positionStatement({ position, vault: vault.state, instruments, ratings, nowTs, maxAgeSecs }),
     );
 }

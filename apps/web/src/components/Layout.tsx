@@ -8,12 +8,12 @@ const NAV = [
     { to: '/history', label: 'Register', end: false },
 ];
 
-// Two claims, because the app is now half on the chain: Compose reads the live
-// catalogue and opens real positions, the other three screens are still the
-// illustrative figures they were built with.
+// Two claims, because the app is now part way onto the chain: Compose and
+// Statement read the deployed vault and open and report real positions, the
+// other two screens are still the illustrative figures they were built with.
 const BANNER =
-    'Demo on Solana devnet. Compose reads the deployed catalogue and opens real positions with demo USDC; ' +
-    'Statement, Redemption and Register are still illustrative figures. Not real securities, ratings, or offers.';
+    'Demo on Solana devnet. Compose and Statement read the deployed vault and work on real positions with demo ' +
+    'USDC; Redemption and Register are still illustrative figures. Not real securities, ratings, or offers.';
 
 function WalletChip() {
     const { wallets, connected, busy, disconnect, connect } = useWallet();

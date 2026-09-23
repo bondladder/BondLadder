@@ -1,6 +1,9 @@
 import {
+    accrueFee,
     type Instrument,
     instrumentSchema,
+    type Position,
+    positionSchema,
     proposeLadder,
     type RatingRecord,
     RUNG_MONTHS,
@@ -14,12 +17,15 @@ import {
     catalogueCandidates,
     chartDomain,
     joinCatalogue,
+    positionStatement,
     ratingAxis,
+    type StatementInput,
     termSheet,
     tokenAmountFrom,
     vaultRefusal,
 } from './chain';
 import { maturityDate } from './format';
+import { ProgramClientError } from './program';
 
 const NOW = 1_800_000_000n;
 const DAY = 86_400n;
@@ -329,5 +335,232 @@ describe('ratingAxis', () => {
         const axis = ratingAxis([5], 5);
 
         expect(axis.ratingMin).toBeLessThan(axis.ratingMax);
+    });
+});
+
+/* ------------------------------------------------------------------ */
+/* The held position                                                   */
+/* ------------------------------------------------------------------ */
+
+const UNITS = 200n;
+const UNIT_PRICE = 1_000_000n;
+const PRINCIPAL = UNITS * UNIT_PRICE * BigInt(RUNG_MONTHS.length);
+
+function months(index: number): number {
+    return RUNG_MONTHS[index] ?? 3;
+}
+
+function heldInstrument(index: number, overrides: Partial<Record<string, unknown>> = {}): Instrument {
+    return instrument({
+        mint: mintAt(index),
+        issuerId: `ISSUER-${index}`,
+        maturityTs: rungTargetTs(NOW, months(index)),
+        priceMicro: UNIT_PRICE,
+        couponBps: 400 + index,
+        ...overrides,
+    });
+}
+
+function heldRating(index: number, overrides: Partial<Record<string, unknown>> = {}): RatingRecord {
+    return rating({ instrumentMint: mintAt(index), notch: 4, ...overrides });
+}
+
+function heldRung(index: number, overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+        targetMonths: months(index),
+        instrument: mintAt(index),
+        amount: UNITS,
+        entryPriceMicro: UNIT_PRICE,
+        entryNotch: 4,
+        maturityTs: rungTargetTs(NOW, months(index)),
+        flagged: false,
+        ...overrides,
+    };
+}
+
+function heldPosition(overrides: Partial<Record<string, unknown>> = {}): Position {
+    return positionSchema.parse({
+        owner: mintAt(4),
+        profile: 'conservative',
+        rungs: RUNG_MONTHS.map((_, index) => heldRung(index)),
+        principalUsdc: PRINCIPAL,
+        feeAccrued: 0n,
+        lastFeeTs: NOW,
+        openedAt: NOW,
+        bump: 252,
+        ...overrides,
+    });
+}
+
+function statementInput(overrides: Partial<StatementInput> = {}): StatementInput {
+    return {
+        position: heldPosition(),
+        vault: vault(),
+        instruments: RUNG_MONTHS.map((_, index) => heldInstrument(index)),
+        ratings: RUNG_MONTHS.map((_, index) => heldRating(index)),
+        nowTs: NOW,
+        maxAgeSecs: MAX_AGE,
+        ...overrides,
+    };
+}
+
+describe('positionStatement', () => {
+    it('values every rung at what the issuer prices it today', () => {
+        const dearer = RUNG_MONTHS.map((_, index) =>
+            index === 0 ? heldInstrument(0, { priceMicro: 1_010_000n }) : heldInstrument(index),
+        );
+        const statement = positionStatement(statementInput({ instruments: dearer }));
+
+        expect(statement.rows[0]).toMatchObject({
+            rungMonths: 3,
+            issuerId: 'ISSUER-0',
+            units: UNITS,
+            entryPriceMicro: UNIT_PRICE,
+            priceMicro: 1_010_000n,
+            costMicro: 200_000_000n,
+            valueMicro: 202_000_000n,
+        });
+        expect(statement.grossValueMicro).toBe(PRINCIPAL + 2_000_000n);
+    });
+
+    // principal_usdc is the sum of what the route actually spent, and each
+    // rung's cost is its units at the price it paid. The two are the same
+    // figure read from two places; a mismatch means the row does not describe
+    // the position the program recorded.
+    it('accounts for the whole principal the program recorded', () => {
+        const statement = positionStatement(statementInput());
+        const cost = statement.rows.reduce((total, row) => total + row.costMicro, 0n);
+
+        expect(cost).toBe(statement.principalMicro);
+        expect(statement.principalMicro).toBe(PRINCIPAL);
+    });
+
+    // FR-030: the fee is a line of its own, and every figure beside it is net.
+    it('shows the accrued fee apart and nets the value of it', () => {
+        const held = 180n * 86_400n;
+        const statement = positionStatement(
+            statementInput({ position: heldPosition({ lastFeeTs: NOW - held, openedAt: NOW - held }) }),
+        );
+
+        expect(statement.feeBps).toBe(50);
+        expect(statement.feeAccruedMicro).toBe(accrueFee(PRINCIPAL, 50, held));
+        expect(statement.feeAccruedMicro).toBeGreaterThan(0n);
+        expect(statement.netValueMicro).toBe(statement.grossValueMicro - statement.feeAccruedMicro);
+        expect(statement.heldSeconds).toBe(held);
+    });
+
+    // Charged at the first next operation, so what the program already wrote
+    // down is a debt the accrual since then is added to, not replaced by.
+    it('adds what is already owed to what has accrued since', () => {
+        const owed = 1_234n;
+        const statement = positionStatement(
+            statementInput({ position: heldPosition({ feeAccrued: owed, lastFeeTs: NOW - 86_400n }) }),
+        );
+
+        expect(statement.feeAccruedMicro).toBe(owed + accrueFee(PRINCIPAL, 50, 86_400n));
+    });
+
+    it('never nets the value below nothing', () => {
+        const statement = positionStatement(statementInput({ position: heldPosition({ feeAccrued: PRINCIPAL * 2n }) }));
+
+        expect(statement.netValueMicro).toBe(0n);
+    });
+
+    // A clock the browser owns and a clock the chain owns are not the same
+    // clock; a few seconds of skew must not become a negative fee.
+    it('accrues nothing for time that has not passed', () => {
+        const statement = positionStatement(
+            statementInput({ position: heldPosition({ lastFeeTs: NOW + 600n, openedAt: NOW + 600n }) }),
+        );
+
+        expect(statement.feeAccruedMicro).toBe(0n);
+        expect(statement.heldSeconds).toBe(0n);
+    });
+
+    it('weights the rating by the money each rung holds', () => {
+        const ratings = RUNG_MONTHS.map((_, index) => heldRating(index, { notch: index === 0 ? 9 : 4 }));
+        const statement = positionStatement(statementInput({ ratings }));
+
+        expect(statement.unratedCount).toBe(0);
+        expect(statement.weightedNotch).toBeCloseTo((9 + 4 * 4) / 5, 10);
+    });
+
+    // The rating on the screen is today's, not the one the position was opened
+    // at — the entry notch stays beside it so a downgrade is visible.
+    it('keeps the grade the rung was bought at beside today’s', () => {
+        const ratings = RUNG_MONTHS.map((_, index) => heldRating(index, { notch: index === 0 ? 9 : 4 }));
+        const statement = positionStatement(statementInput({ ratings }));
+
+        expect(statement.rows[0]).toMatchObject({ entryNotch: 4, notch: 9, agencyCode: 'MOODYS' });
+    });
+
+    // FR-025: an average over the rungs that happen to be rated would be
+    // presented as the portfolio's, which it is not.
+    it('refuses to average a rating it does not have for every rung', () => {
+        const statement = positionStatement(statementInput({ ratings: [heldRating(0), heldRating(1)] }));
+
+        expect(statement.weightedNotch).toBeNull();
+        expect(statement.unratedCount).toBe(3);
+        expect(statement.rows[2]).toMatchObject({ notch: null, agencyCode: null });
+    });
+
+    it('counts a rating the program would refuse as no rating', () => {
+        const stale = RUNG_MONTHS.map((_, index) =>
+            index === 0 ? heldRating(0, { updatedAt: NOW - MAX_AGE - 1n }) : heldRating(index),
+        );
+        const foreign = RUNG_MONTHS.map((_, index) =>
+            index === 0 ? heldRating(0, { scaleVersion: SCALE_VERSION + 1 }) : heldRating(index),
+        );
+
+        expect(positionStatement(statementInput({ ratings: stale })).unratedCount).toBe(1);
+        expect(positionStatement(statementInput({ ratings: foreign })).unratedCount).toBe(1);
+    });
+
+    it('averages the remaining term by the money it applies to', () => {
+        const statement = positionStatement(statementInput());
+        const remaining = statement.rows.reduce((total, row) => total + row.remainingSeconds, 0n);
+
+        expect(statement.averageRemainingSeconds).toBe(remaining / 5n);
+        expect(statement.rows[0]?.remainingSeconds).toBe(rungTargetTs(NOW, 3) - NOW);
+    });
+
+    // Nothing rolls a matured rung until maintenance exists, so it sits in the
+    // position with no term left to run and must not shorten it by less.
+    it('gives a matured rung no remaining term at all', () => {
+        const matured = heldPosition({
+            rungs: RUNG_MONTHS.map((_, index) =>
+                index === 0 ? heldRung(0, { maturityTs: NOW - 86_400n }) : heldRung(index),
+            ),
+        });
+        const statement = positionStatement(statementInput({ position: matured }));
+
+        expect(statement.rows[0]?.remainingSeconds).toBe(0n);
+    });
+
+    it('names the earliest maturity whatever order the rungs arrive in', () => {
+        const reversed = heldPosition({
+            rungs: [...RUNG_MONTHS].map((_, index) => heldRung(RUNG_MONTHS.length - 1 - index)),
+        });
+        const statement = positionStatement(statementInput({ position: reversed }));
+
+        expect(statement.nextMaturity?.rungMonths).toBe(3);
+        expect(statement.nextMaturity?.maturityTs).toBe(rungTargetTs(NOW, 3));
+    });
+
+    it('carries the downgrade flag the program set', () => {
+        const flagged = heldPosition({
+            rungs: RUNG_MONTHS.map((_, index) => heldRung(index, { flagged: index === 2 })),
+        });
+        const statement = positionStatement(statementInput({ position: flagged }));
+
+        expect(statement.rows.map((row) => row.flagged)).toEqual([false, false, true, false, false]);
+    });
+
+    // Reading the position without the instruments behind it cannot produce a
+    // value, and a value short by one rung is worse than none.
+    it('refuses to value a rung whose instrument it could not read', () => {
+        const short = RUNG_MONTHS.slice(1).map((_, index) => heldInstrument(index + 1));
+
+        expect(() => positionStatement(statementInput({ instruments: short }))).toThrow(ProgramClientError);
     });
 });

@@ -67,15 +67,6 @@ export interface Sheet {
     issuerNote: string;
 }
 
-export interface HeldRow {
-    issuer: string;
-    ratingValue: number;
-    maturity: string;
-    daysRemaining: string;
-    amount: string;
-    accrued: string;
-}
-
 export interface RedemptionQuote {
     percent: number;
     positionValue: string;
@@ -123,19 +114,6 @@ export interface PositionSummary {
     nextMaturity: string;
 }
 
-export interface ReconciliationLine {
-    label: string;
-    figure: string;
-    note?: string;
-}
-
-export interface Reconciliation {
-    deposited: ReconciliationLine;
-    coupon: ReconciliationLine;
-    fee: ReconciliationLine;
-    value: ReconciliationLine;
-}
-
 export interface RedemptionTerms {
     spreadPercent: string;
     averageRemainingTerm: string;
@@ -163,12 +141,10 @@ export interface BreachMark {
  */
 export interface LadderSource {
     /* Catalogue and rating scale */
-    BONDS: Bond[];
     AXIS_GRADE_VALUES: number[];
     RATING_MIN: number;
     RATING_MAX: number;
     gradeLabel(value: number): string;
-    bondId(issuer: string, maturity: string): string;
     eligibleIssuers(floorValue: number): Issuer[];
 
     /* Composing a position */
@@ -179,12 +155,8 @@ export interface LadderSource {
     sheetForFloor(floorValue: number, profile: ProfileKey): Sheet | null;
     tooFewIssuersRefusal(floorValue: number): string;
 
-    /* The held position */
+    /** Still read by the redemption screen, which has not moved yet. */
     POSITION: PositionSummary;
-    HELD_ROWS: HeldRow[];
-    RECONCILIATION: Reconciliation;
-    /** The sheet behind the held position — mock and chain alike. */
-    SHEET_CONSERVATIVE: Sheet;
 
     /* Redemption */
     REDEMPTION: RedemptionTerms;
@@ -209,10 +181,11 @@ export interface LadderSource {
 
 /**
  * Two of them, for as long as the move to the chain is half done. `chain`
- * reads the deployed vault, catalogue and ratings and is what the composer
- * uses (T027); `mockSource` still backs the three screens that have not been
- * moved yet. A screen may import neither directly — the boundary is this file,
- * and when the last screen moves the mock simply stops being re-exported.
+ * reads the deployed vault, the catalogue, the ratings and the held position,
+ * and is what the composer (T027) and the statement (T028) use; `mockSource`
+ * still backs the two screens that have not been moved yet. A screen may
+ * import neither directly — the boundary is this file, and when the last
+ * screen moves the mock simply stops being re-exported.
  */
 export * from './chain';
 export * from './mockSource';

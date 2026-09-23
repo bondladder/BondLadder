@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+    dayCount,
     maturityDate,
     microFromUsdc,
     notchLabel,
     percentFromBps,
+    signedUsdcFromMicro,
     termLabel,
     usdc,
     usdcFromMicro,
@@ -124,5 +126,31 @@ describe('microFromUsdc', () => {
 
             expect(microFromUsdc(printed), printed).toBe(micro);
         }
+    });
+});
+
+describe('dayCount', () => {
+    it('prints whole days', () => {
+        expect(dayCount(48n * 86_400n)).toBe('48 days');
+        expect(dayCount(86_400n)).toBe('1 day');
+        expect(dayCount(511n * 86_400n)).toBe('511 days');
+    });
+
+    // A part day is not a day: a rung maturing in nineteen hours has not
+    // matured, and printing `0 days` beside it would read as if it had.
+    it('never calls a part day a day', () => {
+        expect(dayCount(86_399n)).toBe('less than a day');
+        expect(dayCount(0n)).toBe('less than a day');
+    });
+});
+
+describe('signedUsdcFromMicro', () => {
+    it('spells the sign, because the sign is the point of the line', () => {
+        expect(signedUsdcFromMicro(4_350_000n)).toBe('+ 4.35 USDC');
+        expect(signedUsdcFromMicro(-620_000n)).toBe('− 0.62 USDC');
+    });
+
+    it('leaves nothing unsigned', () => {
+        expect(signedUsdcFromMicro(0n)).toBe('0.00 USDC');
     });
 });

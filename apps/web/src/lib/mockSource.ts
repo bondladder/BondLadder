@@ -1,25 +1,15 @@
 /**
  * BondLadder — single source of mock data.
  *
- * Every figure rendered anywhere in the app comes from this file, verbatim.
- * Nothing here is derived at runtime from rates or day counts: the string
- * labels are the authority, the numbers alongside them exist only so the
- * interface can scale a deposit that is not exactly 1,000.00 USDC.
+ * Every figure the two screens still on illustration render comes from this
+ * file, verbatim. Nothing here is derived at runtime from rates or day counts:
+ * the string labels are the authority, the numbers alongside them exist only
+ * so the interface can scale a deposit that is not exactly 1,000.00 USDC.
  *
  * No network, no wallet, no chain. Illustrative figures only.
  */
 
-import type {
-    Bond,
-    HeldRow,
-    Issuer,
-    Profile,
-    ProfileKey,
-    RedemptionQuote,
-    RegisterEntry,
-    Sheet,
-    TermKey,
-} from './source';
+import type { Bond, Issuer, Profile, ProfileKey, RedemptionQuote, RegisterEntry, Sheet, TermKey } from './source';
 
 /* ------------------------------------------------------------------ */
 /* Rating scale                                                        */
@@ -154,7 +144,7 @@ export const CATALOGUE: Issuer[] = [
 ];
 
 /** Every mark on the credit map. */
-export const BONDS: Bond[] = CATALOGUE.flatMap((issuer) =>
+const BONDS: Bond[] = CATALOGUE.flatMap((issuer) =>
     TERMS.map((term) => ({
         id: `${issuer.name}-${term.key}`,
         issuer: issuer.name,
@@ -166,7 +156,7 @@ export const BONDS: Bond[] = CATALOGUE.flatMap((issuer) =>
     })),
 );
 
-export function bondId(issuer: string, maturity: string): string {
+function bondId(issuer: string, maturity: string): string {
     const found = BONDS.find((b) => b.issuer === issuer && b.maturity === maturity);
     return found ? found.id : `${issuer}-${maturity}`;
 }
@@ -186,7 +176,7 @@ export const PROFILE_ORDER: ProfileKey[] = ['conservative', 'balanced'];
 /* Term sheets — figures given verbatim for a 1,000.00 USDC deposit    */
 /* ------------------------------------------------------------------ */
 
-export const SHEET_CONSERVATIVE: Sheet = {
+const SHEET_CONSERVATIVE: Sheet = {
     floorValue: 7,
     holdings: [
         {
@@ -442,60 +432,6 @@ export const POSITION = {
     weightedRating: 'AA- (4.2)',
     averageRemainingTerm: '0.68 years',
     nextMaturity: '2026-12-03 · KESTREL-RAIL · 200.00 USDC',
-};
-
-export const HELD_ROWS: HeldRow[] = [
-    {
-        issuer: 'KESTREL-RAIL',
-        ratingValue: 4,
-        maturity: '2026-12-03',
-        daysRemaining: '48',
-        amount: '200.00 USDC',
-        accrued: '0.97 USDC',
-    },
-    {
-        issuer: 'NORDLYS-ENERGI',
-        ratingValue: 3,
-        maturity: '2027-02-28',
-        daysRemaining: '135',
-        amount: '200.00 USDC',
-        accrued: '0.90 USDC',
-    },
-    {
-        issuer: 'CALDERA-WATER',
-        ratingValue: 6,
-        maturity: '2027-06-07',
-        daysRemaining: '234',
-        amount: '200.00 USDC',
-        accrued: '1.06 USDC',
-    },
-    {
-        issuer: 'HELVETIA-RE',
-        ratingValue: 1,
-        maturity: '2027-08-26',
-        daysRemaining: '314',
-        amount: '200.00 USDC',
-        accrued: '0.79 USDC',
-    },
-    {
-        issuer: 'VERDANT-AGRI',
-        ratingValue: 7,
-        maturity: '2028-03-10',
-        daysRemaining: '511',
-        amount: '200.00 USDC',
-        accrued: '1.25 USDC',
-    },
-];
-
-export const RECONCILIATION = {
-    deposited: { label: 'Deposited', figure: '1,000.00 USDC' },
-    coupon: { label: 'Coupon accrued', figure: '+ 4.97 USDC' },
-    fee: {
-        label: 'Management fee accrued',
-        figure: '− 0.62 USDC',
-        note: '0.5% per year, charged on the next operation, not yet taken',
-    },
-    value: { label: 'Position value', figure: '1,004.35 USDC' },
 };
 
 /* ------------------------------------------------------------------ */

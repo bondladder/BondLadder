@@ -98,3 +98,30 @@ export function usdc(value: number): string {
 export function amount(value: number): string {
     return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+
+const SECONDS_PER_DAY = 86_400n;
+
+/**
+ * `48 days`, `1 day`, `less than a day`.
+ *
+ * Whole days, floored. A rung maturing in nineteen hours has not matured, and
+ * `0 days` beside it would read as if it had.
+ */
+export function dayCount(seconds: bigint): string {
+    const days = seconds / SECONDS_PER_DAY;
+
+    if (days === 0n) {
+        return 'less than a day';
+    }
+
+    return `${days.toLocaleString('en-US')} ${days === 1n ? 'day' : 'days'}`;
+}
+
+/** `+ 4.35 USDC`, `− 0.62 USDC` — on a reconciliation line the sign is the point. */
+export function signedUsdcFromMicro(micro: bigint): string {
+    if (micro === 0n) {
+        return usdcFromMicro(0n);
+    }
+
+    return `${micro < 0n ? '−' : '+'} ${usdcFromMicro(micro < 0n ? -micro : micro)}`;
+}
