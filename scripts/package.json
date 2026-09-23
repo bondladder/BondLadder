@@ -7,7 +7,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "deploy:devnet": "tsx src/deploy.ts",
-    "demo:deposit": "tsx src/demo-deposit.ts"
+    "demo:deposit": "tsx src/demo-deposit.ts",
+    "measure:us1": "tsx src/measure-us1.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
