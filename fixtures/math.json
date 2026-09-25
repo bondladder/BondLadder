@@ -1,5 +1,7 @@
 {
   "secondsPerYear": "31557600",
+  "secondsPerDay": "86400",
+  "daysPerFourYears": "1461",
   "bpsDenominator": 10000,
   "accrual": [
     {
@@ -92,6 +94,314 @@
       "valueMicro": "18446744073709551615",
       "feeBps": 10000,
       "elapsedSeconds": "31557600000000"
+    }
+  ],
+  "weightedRemainingDays": [
+    {
+      "case": "five equal rungs on the protocol grid",
+      "nowTs": "1700000000",
+      "rungs": [
+        {
+          "units": "1000",
+          "priceMicro": "1000000",
+          "maturityTs": "1707776000"
+        },
+        {
+          "units": "1000",
+          "priceMicro": "1000000",
+          "maturityTs": "1715552000"
+        },
+        {
+          "units": "1000",
+          "priceMicro": "1000000",
+          "maturityTs": "1723328000"
+        },
+        {
+          "units": "1000",
+          "priceMicro": "1000000",
+          "maturityTs": "1731536000"
+        },
+        {
+          "units": "1000",
+          "priceMicro": "1000000",
+          "maturityTs": "1747347200"
+        }
+      ],
+      "expectedDays": "290"
+    },
+    {
+      "case": "uneven amounts, prices and odd seconds",
+      "nowTs": "1700000000",
+      "rungs": [
+        {
+          "units": "1500",
+          "priceMicro": "1012500",
+          "maturityTs": "1707866000"
+        },
+        {
+          "units": "900",
+          "priceMicro": "998000",
+          "maturityTs": "1715811200"
+        },
+        {
+          "units": "1200",
+          "priceMicro": "1004000",
+          "maturityTs": "1723846399"
+        },
+        {
+          "units": "800",
+          "priceMicro": "1000500",
+          "maturityTs": "1731622400"
+        },
+        {
+          "units": "2000",
+          "priceMicro": "995000",
+          "maturityTs": "1747433600"
+        }
+      ],
+      "expectedDays": "314"
+    },
+    {
+      "case": "value carries the weight, not the rung count",
+      "nowTs": "1700000000",
+      "rungs": [
+        {
+          "units": "1",
+          "priceMicro": "1000000",
+          "maturityTs": "1700000000"
+        },
+        {
+          "units": "1000",
+          "priceMicro": "1000000",
+          "maturityTs": "1747347200"
+        },
+        {
+          "units": "0",
+          "priceMicro": "1000000",
+          "maturityTs": "1707776000"
+        },
+        {
+          "units": "0",
+          "priceMicro": "1000000",
+          "maturityTs": "1715552000"
+        },
+        {
+          "units": "0",
+          "priceMicro": "1000000",
+          "maturityTs": "1723328000"
+        }
+      ],
+      "expectedDays": "547"
+    },
+    {
+      "case": "a day short of a day counts as no day at all",
+      "nowTs": "1700000000",
+      "rungs": [
+        {
+          "units": "1",
+          "priceMicro": "1000000",
+          "maturityTs": "1700086399"
+        },
+        {
+          "units": "1",
+          "priceMicro": "1000000",
+          "maturityTs": "1700172799"
+        },
+        {
+          "units": "0",
+          "priceMicro": "1000000",
+          "maturityTs": "1700000000"
+        },
+        {
+          "units": "0",
+          "priceMicro": "1000000",
+          "maturityTs": "1700000000"
+        },
+        {
+          "units": "0",
+          "priceMicro": "1000000",
+          "maturityTs": "1700000000"
+        }
+      ],
+      "expectedDays": "0"
+    },
+    {
+      "case": "every rung already matured",
+      "nowTs": "1700000000",
+      "rungs": [
+        {
+          "units": "1000",
+          "priceMicro": "1000000",
+          "maturityTs": "1699999999"
+        },
+        {
+          "units": "1000",
+          "priceMicro": "1000000",
+          "maturityTs": "1691360000"
+        },
+        {
+          "units": "1000",
+          "priceMicro": "1000000",
+          "maturityTs": "1700000000"
+        },
+        {
+          "units": "1000",
+          "priceMicro": "1000000",
+          "maturityTs": "1699999995"
+        },
+        {
+          "units": "1000",
+          "priceMicro": "1000000",
+          "maturityTs": "1699395200"
+        }
+      ],
+      "expectedDays": "0"
+    },
+    {
+      "case": "a position holding nothing has no duration to weight",
+      "nowTs": "1700000000",
+      "rungs": [
+        {
+          "units": "0",
+          "priceMicro": "1000000",
+          "maturityTs": "1707776000"
+        },
+        {
+          "units": "0",
+          "priceMicro": "1000000",
+          "maturityTs": "1707776000"
+        },
+        {
+          "units": "0",
+          "priceMicro": "1000000",
+          "maturityTs": "1707776000"
+        },
+        {
+          "units": "0",
+          "priceMicro": "1000000",
+          "maturityTs": "1707776000"
+        },
+        {
+          "units": "0",
+          "priceMicro": "1000000",
+          "maturityTs": "1707776000"
+        }
+      ],
+      "expectedDays": "0"
+    }
+  ],
+  "spread": [
+    {
+      "case": "four years of duration at the demo coefficient",
+      "grossValueMicro": "1000000000",
+      "feeDueMicro": "0",
+      "spreadCoefBps": 200,
+      "wrdDays": "1461",
+      "expectedMicro": "80000000"
+    },
+    {
+      "case": "a calendar year is not a julian one",
+      "grossValueMicro": "1000000000",
+      "feeDueMicro": "0",
+      "spreadCoefBps": 200,
+      "wrdDays": "365",
+      "expectedMicro": "19986310"
+    },
+    {
+      "case": "the accrued fee leaves the base before the spread does",
+      "grossValueMicro": "1000000000",
+      "feeDueMicro": "5000000",
+      "spreadCoefBps": 200,
+      "wrdDays": "1461",
+      "expectedMicro": "79600000"
+    },
+    {
+      "case": "the same duration off the gross value, for contrast",
+      "grossValueMicro": "1000000000",
+      "feeDueMicro": "0",
+      "spreadCoefBps": 200,
+      "wrdDays": "1461",
+      "expectedMicro": "80000000"
+    },
+    {
+      "case": "the longest rung in the grid",
+      "grossValueMicro": "1000000000",
+      "feeDueMicro": "0",
+      "spreadCoefBps": 200,
+      "wrdDays": "548",
+      "expectedMicro": "30006844"
+    },
+    {
+      "case": "the vault capacity over the longest rung",
+      "grossValueMicro": "10000000000",
+      "feeDueMicro": "0",
+      "spreadCoefBps": 200,
+      "wrdDays": "548",
+      "expectedMicro": "300068446"
+    },
+    {
+      "case": "a position that has all but matured exits almost free",
+      "grossValueMicro": "1000000000",
+      "feeDueMicro": "0",
+      "spreadCoefBps": 200,
+      "wrdDays": "1",
+      "expectedMicro": "54757"
+    },
+    {
+      "case": "a matured position pays no spread",
+      "grossValueMicro": "1000000000",
+      "feeDueMicro": "0",
+      "spreadCoefBps": 200,
+      "wrdDays": "0",
+      "expectedMicro": "0"
+    },
+    {
+      "case": "a coefficient of nothing costs nothing",
+      "grossValueMicro": "1000000000",
+      "feeDueMicro": "0",
+      "spreadCoefBps": 0,
+      "wrdDays": "1461",
+      "expectedMicro": "0"
+    },
+    {
+      "case": "a fee larger than the position leaves no base",
+      "grossValueMicro": "1000000000",
+      "feeDueMicro": "2000000000",
+      "spreadCoefBps": 200,
+      "wrdDays": "1461",
+      "expectedMicro": "0"
+    },
+    {
+      "case": "a fee of exactly the position leaves no base",
+      "grossValueMicro": "1000000000",
+      "feeDueMicro": "1000000000",
+      "spreadCoefBps": 200,
+      "wrdDays": "1461",
+      "expectedMicro": "0"
+    },
+    {
+      "case": "a full rate over four years asks for more than the position holds",
+      "grossValueMicro": "1000000000",
+      "feeDueMicro": "0",
+      "spreadCoefBps": 10000,
+      "wrdDays": "1461",
+      "expectedMicro": "4000000000"
+    }
+  ],
+  "spreadRefused": [
+    {
+      "case": "the product does not fit u128",
+      "grossValueMicro": "18446744073709551615",
+      "feeDueMicro": "0",
+      "spreadCoefBps": 10000,
+      "wrdDays": "18446744073709551615"
+    },
+    {
+      "case": "the spread does not fit u64 though the product fit u128",
+      "grossValueMicro": "18446744073709551615",
+      "feeDueMicro": "0",
+      "spreadCoefBps": 10000,
+      "wrdDays": "1461"
     }
   ]
 }
