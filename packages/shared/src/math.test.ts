@@ -1,9 +1,26 @@
 import { describe, expect, it } from 'vitest'
 import fixture from '../../../fixtures/math.json'
-import { accrueFee, BPS_DENOMINATOR, MathOverflowError, SECONDS_PER_YEAR } from './math'
+import {
+  accrueFee,
+  BPS_DENOMINATOR,
+  DAYS_PER_FOUR_YEARS,
+  exitQuote,
+  exitSpread,
+  MathOverflowError,
+  type RungValue,
+  SECONDS_PER_DAY,
+  SECONDS_PER_YEAR,
+  weightedRemainingDays,
+} from './math'
 
 const THOUSAND_USDC = 1_000_000_000n
 const FEE_BPS = 50
+const SPREAD_COEF_BPS = 200
+const LONGEST_RUNG_DAYS = 548n
+const NOW_TS = 1_700_000_000n
+const U64_MAX = 2n ** 64n - 1n
+const I64_MAX = 2n ** 63n - 1n
+const I64_MIN = -(2n ** 63n)
 
 describe('комісія за управління', () => {
   it('має ті самі константи, що й фікстур', () => {
@@ -59,5 +76,270 @@ describe('комісія за управління', () => {
     expect(() => accrueFee(THOUSAND_USDC, -1, 1n)).toThrow(MathOverflowError)
     expect(() => accrueFee(THOUSAND_USDC, 65_536, 1n)).toThrow(MathOverflowError)
     expect(() => accrueFee(THOUSAND_USDC, FEE_BPS, -1n)).toThrow(MathOverflowError)
+  })
+})
+
+interface FixtureRung {
+  readonly units: string
+  readonly priceMicro: string
+  readonly maturityTs: string
+}
+
+function rungsOf(listed: readonly FixtureRung[]): RungValue[] {
+  return listed.map((held) => ({
+    units: BigInt(held.units),
+    priceMicro: BigInt(held.priceMicro),
+    maturityTs: BigInt(held.maturityTs),
+  }))
+}
+
+function oneRungDueIn(seconds: bigint): RungValue[] {
+  return [
+    { units: 1n, priceMicro: 1_000_000n, maturityTs: NOW_TS + seconds },
+    ...Array.from({ length: 4 }, () => ({ units: 0n, priceMicro: 1_000_000n, maturityTs: NOW_TS })),
+  ]
+}
+
+const GRID_POSITION = rungsOf(fixture.weightedRemainingDays[0]?.rungs ?? [])
+
+describe('weighted remaining duration', () => {
+  it('has the same constants as the shared fixture', () => {
+    expect(SECONDS_PER_DAY).toBe(BigInt(fixture.secondsPerDay))
+    expect(DAYS_PER_FOUR_YEARS).toBe(BigInt(fixture.daysPerFourYears))
+  })
+
+  // The spread's year and the fee's year are one julian year in two units.
+  it('divides the spread by the same year the fee charges', () => {
+    expect(DAYS_PER_FOUR_YEARS * SECONDS_PER_DAY).toBe(4n * SECONDS_PER_YEAR)
+  })
+
+  it('weighs exactly what the shared fixture records', () => {
+    expect(fixture.weightedRemainingDays).toHaveLength(6)
+
+    for (const entry of fixture.weightedRemainingDays) {
+      expect(weightedRemainingDays(rungsOf(entry.rungs), BigInt(entry.nowTs)), entry.case).toBe(
+        BigInt(entry.expectedDays),
+      )
+    }
+  })
+
+  // Floored per rung before weighting, as the program does; weighting the
+  // seconds instead is the dashboard's figure, not the quote's.
+  it('stops counting a rung once it has matured and floors each rung to whole days', () => {
+    expect(weightedRemainingDays(oneRungDueIn(0n), NOW_TS)).toBe(0n)
+    expect(weightedRemainingDays(oneRungDueIn(-1n), NOW_TS)).toBe(0n)
+    expect(weightedRemainingDays(oneRungDueIn(86_399n), NOW_TS)).toBe(0n)
+    expect(weightedRemainingDays(oneRungDueIn(86_400n), NOW_TS)).toBe(1n)
+    expect(weightedRemainingDays(oneRungDueIn(172_801n), NOW_TS)).toBe(2n)
+  })
+
+  // i64 subtraction saturates in the program; bigint would not.
+  it('saturates the remaining time where the program does', () => {
+    const farthest = oneRungDueIn(0n).map((rung, index) =>
+      index === 0 ? { ...rung, maturityTs: I64_MAX } : rung,
+    )
+    const earliest = oneRungDueIn(0n).map((rung, index) =>
+      index === 0 ? { ...rung, maturityTs: I64_MIN } : rung,
+    )
+
+    expect(weightedRemainingDays(farthest, I64_MIN)).toBe(I64_MAX / SECONDS_PER_DAY)
+    expect(weightedRemainingDays(earliest, NOW_TS)).toBe(0n)
+  })
+
+  it('refuses a weighted sum that does not fit u128', () => {
+    const heaviest = GRID_POSITION.map((rung) => ({ ...rung, units: U64_MAX, priceMicro: U64_MAX }))
+
+    expect(() => weightedRemainingDays(heaviest, NOW_TS)).toThrow(MathOverflowError)
+  })
+
+  it('rejects input that does not fit the width of the program', () => {
+    const withFirst = (patch: Partial<RungValue>): RungValue[] =>
+      GRID_POSITION.map((rung, index) => (index === 0 ? { ...rung, ...patch } : rung))
+
+    expect(() => weightedRemainingDays(withFirst({ units: -1n }), NOW_TS)).toThrow(
+      MathOverflowError,
+    )
+    expect(() => weightedRemainingDays(withFirst({ units: 2n ** 64n }), NOW_TS)).toThrow(
+      MathOverflowError,
+    )
+    expect(() => weightedRemainingDays(withFirst({ priceMicro: 2n ** 64n }), NOW_TS)).toThrow(
+      MathOverflowError,
+    )
+    expect(() => weightedRemainingDays(withFirst({ maturityTs: I64_MAX + 1n }), NOW_TS)).toThrow(
+      MathOverflowError,
+    )
+    expect(() => weightedRemainingDays(GRID_POSITION, I64_MIN - 1n)).toThrow(MathOverflowError)
+  })
+})
+
+describe('exit spread', () => {
+  it('withholds exactly what the shared fixture records', () => {
+    expect(fixture.spread).toHaveLength(12)
+
+    for (const entry of fixture.spread) {
+      expect(
+        exitSpread(
+          BigInt(entry.grossValueMicro),
+          BigInt(entry.feeDueMicro),
+          entry.spreadCoefBps,
+          BigInt(entry.wrdDays),
+        ),
+        entry.case,
+      ).toBe(BigInt(entry.expectedMicro))
+    }
+  })
+
+  it('refuses where the program refuses', () => {
+    expect(fixture.spreadRefused).toHaveLength(2)
+
+    for (const entry of fixture.spreadRefused) {
+      expect(
+        () =>
+          exitSpread(
+            BigInt(entry.grossValueMicro),
+            BigInt(entry.feeDueMicro),
+            entry.spreadCoefBps,
+            BigInt(entry.wrdDays),
+          ),
+        entry.case,
+      ).toThrow(MathOverflowError)
+    }
+  })
+
+  it('is taken off what the accrued fee leaves behind', () => {
+    const feeDue = 5_000_000n
+
+    const onTheNet = exitSpread(THOUSAND_USDC, feeDue, SPREAD_COEF_BPS, DAYS_PER_FOUR_YEARS)
+    const onTheGross = exitSpread(THOUSAND_USDC, 0n, SPREAD_COEF_BPS, DAYS_PER_FOUR_YEARS)
+
+    expect(onTheNet).toBe(
+      exitSpread(THOUSAND_USDC - feeDue, 0n, SPREAD_COEF_BPS, DAYS_PER_FOUR_YEARS),
+    )
+    expect(onTheNet).toBeLessThan(onTheGross)
+  })
+
+  it('never runs ahead of the exact figure and never loses a whole micro-USDC', () => {
+    for (const wrdDays of [1n, 29n, 91n, 365n, LONGEST_RUNG_DAYS, DAYS_PER_FOUR_YEARS]) {
+      const withheld = exitSpread(THOUSAND_USDC, 0n, SPREAD_COEF_BPS, wrdDays)
+      const exact = THOUSAND_USDC * BigInt(SPREAD_COEF_BPS) * wrdDays * 4n
+      const denominator = BPS_DENOMINATOR * DAYS_PER_FOUR_YEARS
+
+      expect(withheld * denominator, `${wrdDays} d`).toBeLessThanOrEqual(exact)
+      expect((withheld + 1n) * denominator, `${wrdDays} d`).toBeGreaterThan(exact)
+    }
+  })
+
+  it('grows with the remaining duration', () => {
+    let previous = exitSpread(THOUSAND_USDC, 0n, SPREAD_COEF_BPS, 0n)
+    expect(previous).toBe(0n)
+
+    for (const wrdDays of [1n, 91n, 182n, 365n, LONGEST_RUNG_DAYS, DAYS_PER_FOUR_YEARS]) {
+      const current = exitSpread(THOUSAND_USDC, 0n, SPREAD_COEF_BPS, wrdDays)
+      expect(current, `${wrdDays} d`).toBeGreaterThan(previous)
+      previous = current
+    }
+  })
+
+  it('rejects input that does not fit the width of the program', () => {
+    expect(() => exitSpread(-1n, 0n, SPREAD_COEF_BPS, 1n)).toThrow(MathOverflowError)
+    expect(() => exitSpread(2n ** 64n, 0n, SPREAD_COEF_BPS, 1n)).toThrow(MathOverflowError)
+    expect(() => exitSpread(THOUSAND_USDC, -1n, SPREAD_COEF_BPS, 1n)).toThrow(MathOverflowError)
+    expect(() => exitSpread(THOUSAND_USDC, 2n ** 64n, SPREAD_COEF_BPS, 1n)).toThrow(
+      MathOverflowError,
+    )
+    expect(() => exitSpread(THOUSAND_USDC, 0n, -1, 1n)).toThrow(MathOverflowError)
+    expect(() => exitSpread(THOUSAND_USDC, 0n, 65_536, 1n)).toThrow(MathOverflowError)
+    expect(() => exitSpread(THOUSAND_USDC, 0n, 0.5, 1n)).toThrow(MathOverflowError)
+    expect(() => exitSpread(THOUSAND_USDC, 0n, SPREAD_COEF_BPS, -1n)).toThrow(MathOverflowError)
+    expect(() => exitSpread(THOUSAND_USDC, 0n, SPREAD_COEF_BPS, 2n ** 64n)).toThrow(
+      MathOverflowError,
+    )
+  })
+})
+
+describe('exit quote breakdown', () => {
+  // Expected figures come from a Fraction over 365.25 days, not from the
+  // integer path under test.
+  it('walks from the current value through the duration and the spread to the payout', () => {
+    const quote = exitQuote({
+      rungs: GRID_POSITION,
+      nowTs: NOW_TS,
+      feeDueMicro: 12_345_678n,
+      spreadCoefBps: SPREAD_COEF_BPS,
+    })
+
+    expect(quote).toEqual({
+      grossValueMicro: 5_000_000_000n,
+      netValueMicro: 4_987_654_322n,
+      wrdDays: 290n,
+      spreadMicro: 79_201_629n,
+      payoutMicro: 4_908_452_693n,
+    })
+  })
+
+  it('accounts for every micro-USDC of the position', () => {
+    for (const feeDueMicro of [0n, 1n, 5_000_000n, 4_999_999_999n]) {
+      const quote = exitQuote({
+        rungs: GRID_POSITION,
+        nowTs: NOW_TS,
+        feeDueMicro,
+        spreadCoefBps: SPREAD_COEF_BPS,
+      })
+
+      expect(quote.payoutMicro + quote.spreadMicro + feeDueMicro, `${feeDueMicro}`).toBe(
+        quote.grossValueMicro,
+      )
+    }
+  })
+
+  it('prints the same duration and spread the program withholds', () => {
+    for (const entry of fixture.weightedRemainingDays) {
+      const quote = exitQuote({
+        rungs: rungsOf(entry.rungs),
+        nowTs: BigInt(entry.nowTs),
+        feeDueMicro: 0n,
+        spreadCoefBps: SPREAD_COEF_BPS,
+      })
+
+      expect(quote.wrdDays, entry.case).toBe(BigInt(entry.expectedDays))
+      expect(quote.spreadMicro, entry.case).toBe(
+        exitSpread(quote.grossValueMicro, 0n, SPREAD_COEF_BPS, quote.wrdDays),
+      )
+    }
+  })
+
+  it('pays nothing and withholds nothing once the fee has eaten the position', () => {
+    const quote = exitQuote({
+      rungs: GRID_POSITION,
+      nowTs: NOW_TS,
+      feeDueMicro: 6_000_000_000n,
+      spreadCoefBps: SPREAD_COEF_BPS,
+    })
+
+    expect(quote.grossValueMicro).toBe(5_000_000_000n)
+    expect(quote.netValueMicro).toBe(0n)
+    expect(quote.spreadMicro).toBe(0n)
+    expect(quote.payoutMicro).toBe(0n)
+  })
+
+  // Reachable only far outside the configured coefficient: a negative payout
+  // is a quote no transaction could settle.
+  it('refuses a spread larger than what the position is worth', () => {
+    const fourYearsOut = GRID_POSITION.map((rung) => ({
+      ...rung,
+      maturityTs: NOW_TS + DAYS_PER_FOUR_YEARS * SECONDS_PER_DAY,
+    }))
+
+    expect(() =>
+      exitQuote({ rungs: fourYearsOut, nowTs: NOW_TS, feeDueMicro: 0n, spreadCoefBps: 10_000 }),
+    ).toThrow(MathOverflowError)
+  })
+
+  it('refuses a position value that does not fit u64', () => {
+    const tooRich = GRID_POSITION.map((rung) => ({ ...rung, units: 2n ** 62n }))
+
+    expect(() =>
+      exitQuote({ rungs: tooRich, nowTs: NOW_TS, feeDueMicro: 0n, spreadCoefBps: SPREAD_COEF_BPS }),
+    ).toThrow(MathOverflowError)
   })
 })
