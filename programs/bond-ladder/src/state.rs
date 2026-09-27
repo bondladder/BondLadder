@@ -26,6 +26,38 @@ pub struct Vault {
 
 impl Vault {
     pub const SEED: &'static [u8] = b"vault";
+
+    pub fn fund_backstop(&mut self, amount: u64) -> Result<()> {
+        require!(amount > 0, LadderError::ZeroBackstopAmount);
+
+        self.backstop_free_usdc = self
+            .backstop_free_usdc
+            .checked_add(amount)
+            .ok_or_else(|| error!(LadderError::MathOverflow))?;
+
+        Ok(())
+    }
+
+    /// The floor is the principal of every open position (FR-027): an empty
+    /// pool refuses every exit (FR-015), and that would let the admin block
+    /// exits, which FR-023 forbids. Only free USDC counts toward it — the
+    /// instruments the pool bought back pay out at maturity, not today.
+    pub fn withdraw_backstop(&mut self, amount: u64) -> Result<()> {
+        require!(amount > 0, LadderError::ZeroBackstopAmount);
+
+        let remaining = self
+            .backstop_free_usdc
+            .checked_sub(amount)
+            .ok_or_else(|| error!(LadderError::BackstopInsufficient))?;
+        require!(
+            remaining >= self.total_principal_usdc,
+            LadderError::BackstopBelowObligations
+        );
+
+        self.backstop_free_usdc = remaining;
+
+        Ok(())
+    }
 }
 
 /// Один щабель лествиці: скільки одиниць інструмента лежить у кастодії vault
@@ -196,5 +228,117 @@ mod tests {
         };
 
         assert!(exact.validate().is_ok());
+    }
+
+    const THOUSAND_USDC: u64 = 1_000_000_000;
+
+    fn vault(backstop_free_usdc: u64, total_principal_usdc: u64) -> Vault {
+        Vault {
+            admin: Pubkey::default(),
+            usdc_mint: Pubkey::default(),
+            rating_oracle: Pubkey::default(),
+            issuer_program: Pubkey::default(),
+            fee_bps: 50,
+            spread_coef_bps: 200,
+            crank_reward_bps: 10,
+            min_deposit: 100_000_000,
+            capacity_usdc: 10_000_000_000,
+            total_principal_usdc,
+            backstop_free_usdc,
+            backstop_locked_value: 7,
+            paused: false,
+            bump: 255,
+        }
+    }
+
+    #[test]
+    fn funding_adds_to_the_free_backstop_and_nothing_else() {
+        let mut funded = vault(THOUSAND_USDC, 3 * THOUSAND_USDC);
+
+        funded
+            .fund_backstop(2 * THOUSAND_USDC)
+            .expect("funding succeeds");
+
+        assert_eq!(funded.backstop_free_usdc, 3 * THOUSAND_USDC);
+        assert_eq!(funded.total_principal_usdc, 3 * THOUSAND_USDC);
+        assert_eq!(funded.backstop_locked_value, 7);
+    }
+
+    #[test]
+    fn funding_that_overflows_the_counter_is_refused() {
+        let mut full = vault(u64::MAX, 0);
+
+        assert_eq!(
+            error_code(full.fund_backstop(1)),
+            u32::from(LadderError::MathOverflow)
+        );
+        assert_eq!(full.backstop_free_usdc, u64::MAX);
+    }
+
+    /// FR-027 keeps the admin above the obligations of the open positions:
+    /// an empty pool refuses every exit (FR-015), and blocking exits is the one
+    /// thing the admin must not be able to do (FR-023).
+    #[test]
+    fn the_admin_withdraws_down_to_the_open_principal_and_not_a_unit_further() {
+        let mut surplus = vault(5 * THOUSAND_USDC, 3 * THOUSAND_USDC);
+
+        surplus
+            .withdraw_backstop(2 * THOUSAND_USDC)
+            .expect("the surplus is the admin's");
+        assert_eq!(surplus.backstop_free_usdc, 3 * THOUSAND_USDC);
+
+        assert_eq!(
+            error_code(surplus.withdraw_backstop(1)),
+            u32::from(LadderError::BackstopBelowObligations)
+        );
+        assert_eq!(surplus.backstop_free_usdc, 3 * THOUSAND_USDC);
+    }
+
+    #[test]
+    fn a_pool_with_no_open_positions_can_be_emptied() {
+        let mut idle = vault(THOUSAND_USDC, 0);
+
+        idle.withdraw_backstop(THOUSAND_USDC)
+            .expect("nothing is owed");
+
+        assert_eq!(idle.backstop_free_usdc, 0);
+    }
+
+    /// Instruments the pool bought back mature into USDC only later, so they
+    /// cover no exit today: the floor is held by free USDC alone.
+    #[test]
+    fn instruments_held_by_the_pool_do_not_count_toward_the_floor() {
+        let mut underfunded = vault(THOUSAND_USDC, THOUSAND_USDC);
+        underfunded.backstop_locked_value = 10 * THOUSAND_USDC;
+
+        assert_eq!(
+            error_code(underfunded.withdraw_backstop(1)),
+            u32::from(LadderError::BackstopBelowObligations)
+        );
+    }
+
+    #[test]
+    fn more_than_the_pool_holds_is_refused_as_insufficient() {
+        let mut short = vault(THOUSAND_USDC, 0);
+
+        assert_eq!(
+            error_code(short.withdraw_backstop(THOUSAND_USDC + 1)),
+            u32::from(LadderError::BackstopInsufficient)
+        );
+        assert_eq!(short.backstop_free_usdc, THOUSAND_USDC);
+    }
+
+    #[test]
+    fn a_transfer_of_nothing_is_refused_both_ways() {
+        let mut pool = vault(THOUSAND_USDC, 0);
+
+        assert_eq!(
+            error_code(pool.fund_backstop(0)),
+            u32::from(LadderError::ZeroBackstopAmount)
+        );
+        assert_eq!(
+            error_code(pool.withdraw_backstop(0)),
+            u32::from(LadderError::ZeroBackstopAmount)
+        );
     }
 }

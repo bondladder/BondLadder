@@ -34,6 +34,14 @@ pub mod bond_ladder {
         instructions::set_config::set_paused(ctx, paused)
     }
 
+    pub fn fund_backstop(ctx: Context<FundBackstop>, amount_micro: u64) -> Result<()> {
+        instructions::backstop::fund_backstop(ctx, amount_micro)
+    }
+
+    pub fn withdraw_backstop(ctx: Context<WithdrawBackstop>, amount_micro: u64) -> Result<()> {
+        instructions::backstop::withdraw_backstop(ctx, amount_micro)
+    }
+
     /// Пропозиція з п'яти інструментів передається у `remaining_accounts`
     /// четвірками: інструмент, рейтинг, мінт, кастодія vault.
     pub fn open_ladder<'info>(

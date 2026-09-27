@@ -44,4 +44,10 @@ pub enum LadderError {
     MissingRungAccounts,
     #[msg("Куплені інструменти мають лягати в кастодію vault")]
     CustodyNotOwnedByVault,
+    #[msg("The backstop pool does not hold that much free USDC")]
+    BackstopInsufficient,
+    #[msg("The backstop cannot drop below what the open positions have put in")]
+    BackstopBelowObligations,
+    #[msg("A backstop transfer must move a positive amount")]
+    ZeroBackstopAmount,
 }
