@@ -58,6 +58,35 @@ impl Vault {
 
         Ok(())
     }
+
+    /// The pool pays the exit out of free USDC and takes on the instruments
+    /// at today's value (FR-031), and the principal leaving the vault stops
+    /// holding up the withdrawal floor. All three move or none does.
+    pub fn take_exit(
+        &mut self,
+        payout_micro: u64,
+        principal_micro: u64,
+        instruments_value_micro: u64,
+    ) -> Result<()> {
+        let free = self
+            .backstop_free_usdc
+            .checked_sub(payout_micro)
+            .ok_or_else(|| error!(LadderError::BackstopInsufficient))?;
+        let principal = self
+            .total_principal_usdc
+            .checked_sub(principal_micro)
+            .ok_or_else(|| error!(LadderError::MathOverflow))?;
+        let locked = self
+            .backstop_locked_value
+            .checked_add(instruments_value_micro)
+            .ok_or_else(|| error!(LadderError::MathOverflow))?;
+
+        self.backstop_free_usdc = free;
+        self.total_principal_usdc = principal;
+        self.backstop_locked_value = locked;
+
+        Ok(())
+    }
 }
 
 /// Один щабель лествиці: скільки одиниць інструмента лежить у кастодії vault
@@ -96,6 +125,22 @@ pub struct Position {
 
 impl Position {
     pub const SEED: &'static [u8] = b"position";
+}
+
+/// Units of one instrument the backstop pool has bought back on exits and
+/// holds until maturity (FR-031). The instruments themselves never move: the
+/// vault's custody is pooled, so taking them over is a transfer of the record.
+#[account]
+#[derive(InitSpace)]
+pub struct BackstopHolding {
+    pub instrument: Pubkey,
+    pub amount: u64,
+    pub maturity_ts: i64,
+    pub bump: u8,
+}
+
+impl BackstopHolding {
+    pub const SEED: &'static [u8] = b"backstop";
 }
 
 /// Налаштування, з якими vault створюється. Окремою структурою, бо межі
@@ -340,5 +385,46 @@ mod tests {
             error_code(pool.withdraw_backstop(0)),
             u32::from(LadderError::ZeroBackstopAmount)
         );
+    }
+
+    /// FR-031: the pool pays out free USDC and takes on the instruments, and
+    /// the principal leaving the vault stops counting toward the floor, or the
+    /// floor would outlive the positions it protects (FR-027).
+    #[test]
+    fn an_exit_moves_all_three_pool_counters_at_once() {
+        let mut pool = vault(5 * THOUSAND_USDC, 3 * THOUSAND_USDC);
+
+        pool.take_exit(980_000_000, THOUSAND_USDC, 1_010_000_000)
+            .expect("the pool covers the exit");
+
+        assert_eq!(pool.backstop_free_usdc, 5 * THOUSAND_USDC - 980_000_000);
+        assert_eq!(pool.total_principal_usdc, 2 * THOUSAND_USDC);
+        assert_eq!(pool.backstop_locked_value, 7 + 1_010_000_000);
+    }
+
+    #[test]
+    fn an_exit_the_pool_cannot_cover_changes_nothing() {
+        let mut short = vault(THOUSAND_USDC, 3 * THOUSAND_USDC);
+
+        assert_eq!(
+            error_code(short.take_exit(THOUSAND_USDC + 1, THOUSAND_USDC, THOUSAND_USDC)),
+            u32::from(LadderError::BackstopInsufficient)
+        );
+        assert_eq!(short.backstop_free_usdc, THOUSAND_USDC);
+        assert_eq!(short.total_principal_usdc, 3 * THOUSAND_USDC);
+        assert_eq!(short.backstop_locked_value, 7);
+    }
+
+    #[test]
+    fn an_exit_of_more_principal_than_the_vault_holds_changes_nothing() {
+        let mut pool = vault(5 * THOUSAND_USDC, THOUSAND_USDC);
+
+        assert_eq!(
+            error_code(pool.take_exit(1, THOUSAND_USDC + 1, 1)),
+            u32::from(LadderError::MathOverflow)
+        );
+        assert_eq!(pool.backstop_free_usdc, 5 * THOUSAND_USDC);
+        assert_eq!(pool.total_principal_usdc, THOUSAND_USDC);
+        assert_eq!(pool.backstop_locked_value, 7);
     }
 }

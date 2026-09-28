@@ -116,6 +116,102 @@ pub fn exit_spread(
     u64::try_from(numerator / DENOMINATOR).map_err(|_| error!(LadderError::MathOverflow))
 }
 
+/// What the rungs are worth at today's prices, before any fee or spread.
+pub fn gross_value(rungs: &[RungValue; RUNG_COUNT]) -> Result<u64> {
+    let mut gross = 0u128;
+    for rung in rungs {
+        gross = u128::from(rung.units)
+            .checked_mul(u128::from(rung.price_micro))
+            .and_then(|value| gross.checked_add(value))
+            .ok_or_else(|| error!(LadderError::MathOverflow))?;
+    }
+
+    u64::try_from(gross).map_err(|_| error!(LadderError::MathOverflow))
+}
+
+/// What an instant exit moves (FR-012, FR-031): the units the pool takes from
+/// each rung, what they are worth today, and how that value splits between the
+/// fee, the spread and the owner.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ExitSettlement {
+    pub units: [u64; RUNG_COUNT],
+    pub gross_value_micro: u64,
+    pub wrd_days: u64,
+    pub fee_charged_micro: u64,
+    /// The part of the fee a thin slice could not cover. It stays owed by what
+    /// remains of the position instead of being forgiven.
+    pub fee_carried_micro: u64,
+    pub spread_micro: u64,
+    pub payout_micro: u64,
+    pub principal_micro: u64,
+}
+
+/// Settles an exit of `share_bps` of the position.
+///
+/// Every rung gives up the same share, floored to whole units, so what remains
+/// keeps the ladder's proportions and the dropped remainder stays with the
+/// owner. The whole fee due is settled here, not a share of it: FR-020 charges
+/// it on any operation that touches the position. A full exit prices exactly
+/// as `exit_spread` quotes the whole position.
+pub fn settle_exit(
+    rungs: &[RungValue; RUNG_COUNT],
+    principal_usdc: u64,
+    fee_due_micro: u64,
+    share_bps: u16,
+    spread_coef_bps: u16,
+    now_ts: i64,
+) -> Result<ExitSettlement> {
+    require!(
+        share_bps > 0 && share_bps <= BPS_DENOMINATOR,
+        LadderError::InvalidExitShare
+    );
+
+    let mut leaving = *rungs;
+    let mut units = [0u64; RUNG_COUNT];
+    for (index, rung) in leaving.iter_mut().enumerate() {
+        rung.units = share_of(rung.units, share_bps)?;
+        units[index] = rung.units;
+    }
+    require!(
+        units.iter().any(|&moved| moved > 0),
+        LadderError::ExitMovesNothing
+    );
+
+    let gross_value_micro = gross_value(&leaving)?;
+    let fee_charged_micro = fee_due_micro.min(gross_value_micro);
+    let net_value_micro = gross_value_micro - fee_charged_micro;
+    let wrd_days = weighted_remaining_days(&leaving, now_ts)?;
+    let spread_micro = exit_spread(
+        gross_value_micro,
+        fee_charged_micro,
+        spread_coef_bps,
+        wrd_days,
+    )?;
+    let payout_micro = net_value_micro
+        .checked_sub(spread_micro)
+        .ok_or_else(|| error!(LadderError::SpreadExceedsValue))?;
+
+    Ok(ExitSettlement {
+        units,
+        gross_value_micro,
+        wrd_days,
+        fee_charged_micro,
+        fee_carried_micro: fee_due_micro - fee_charged_micro,
+        spread_micro,
+        payout_micro,
+        principal_micro: share_of(principal_usdc, share_bps)?,
+    })
+}
+
+fn share_of(amount: u64, share_bps: u16) -> Result<u64> {
+    let scaled = u128::from(amount)
+        .checked_mul(u128::from(share_bps))
+        .ok_or_else(|| error!(LadderError::MathOverflow))?;
+
+    u64::try_from(scaled / u128::from(BPS_DENOMINATOR))
+        .map_err(|_| error!(LadderError::MathOverflow))
+}
+
 /// Депозит ділиться на п'ять рівних часток, а неподільний залишок додається до
 /// щабля 18 місяців (FR-032). Рахує це програма, а не клієнт: `verify_proposal`
 /// звіряє лише суму часток, тож рівність між собою тримається саме тут.
@@ -608,5 +704,196 @@ mod tests {
                 "position {position}: spread {withheld} takes more than a twenty-fifth of {gross_micro}"
             );
         }
+    }
+
+    const RUNG_DAYS: [i64; RUNG_COUNT] = [91, 183, 274, 365, 548];
+    const EXIT_NOW: i64 = 1_800_000_000;
+    const WHOLE: u16 = BPS_DENOMINATOR;
+
+    fn ladder(units: [u64; RUNG_COUNT], prices: [u64; RUNG_COUNT]) -> [RungValue; RUNG_COUNT] {
+        let mut rungs = [RungValue::default(); RUNG_COUNT];
+        for index in 0..RUNG_COUNT {
+            rungs[index] = RungValue {
+                units: units[index],
+                price_micro: prices[index],
+                maturity_ts: EXIT_NOW + RUNG_DAYS[index] * SECONDS_PER_DAY as i64,
+            };
+        }
+        rungs
+    }
+
+    fn even_ladder() -> [RungValue; RUNG_COUNT] {
+        ladder([200; RUNG_COUNT], [1_000_000; RUNG_COUNT])
+    }
+
+    // Expected figures below were worked out with exact fractions over a
+    // 365.25-day year, not with the integer formula under test.
+    #[test]
+    fn a_full_exit_hands_the_pool_every_unit_and_pays_the_quote() {
+        let settled = settle_exit(
+            &even_ladder(),
+            THOUSAND_USDC,
+            1_000_000,
+            WHOLE,
+            SPREAD_COEF_BPS,
+            EXIT_NOW,
+        )
+        .expect("a demo position settles");
+
+        assert_eq!(
+            settled,
+            ExitSettlement {
+                units: [200; RUNG_COUNT],
+                gross_value_micro: THOUSAND_USDC,
+                wrd_days: 292,
+                fee_charged_micro: 1_000_000,
+                fee_carried_micro: 0,
+                spread_micro: 15_973_059,
+                payout_micro: 983_026_941,
+                principal_micro: THOUSAND_USDC,
+            }
+        );
+    }
+
+    /// FR-020 settles the whole accrued fee on any operation that touches the
+    /// position, a partial exit included, so what remains starts with none owed.
+    #[test]
+    fn a_partial_exit_takes_the_same_share_of_every_rung_and_the_whole_fee() {
+        let settled = settle_exit(
+            &ladder(
+                [201, 199, 203, 197, 205],
+                [990_000, 985_000, 1_000_000, 995_000, 1_010_000],
+            ),
+            999_999_999,
+            2_345_678,
+            5_000,
+            SPREAD_COEF_BPS,
+            EXIT_NOW,
+        )
+        .expect("a demo position settles");
+
+        assert_eq!(
+            settled,
+            ExitSettlement {
+                units: [100, 99, 101, 98, 102],
+                gross_value_micro: 498_045_000,
+                wrd_days: 294,
+                fee_charged_micro: 2_345_678,
+                fee_carried_micro: 0,
+                spread_micro: 7_980_046,
+                payout_micro: 487_719_276,
+                principal_micro: 499_999_999,
+            }
+        );
+    }
+
+    /// A slice too thin to cover the fee pays nothing, and the part of the fee
+    /// it could not cover stays owed by what remains rather than vanishing.
+    #[test]
+    fn a_fee_larger_than_the_slice_is_carried_by_the_rest_of_the_position() {
+        let settled = settle_exit(
+            &even_ladder(),
+            THOUSAND_USDC,
+            700_000_000,
+            1_000,
+            SPREAD_COEF_BPS,
+            EXIT_NOW,
+        )
+        .expect("a thin slice still settles");
+
+        assert_eq!(settled.units, [20; RUNG_COUNT]);
+        assert_eq!(settled.gross_value_micro, 100_000_000);
+        assert_eq!(settled.fee_charged_micro, 100_000_000);
+        assert_eq!(settled.fee_carried_micro, 600_000_000);
+        assert_eq!(settled.spread_micro, 0);
+        assert_eq!(settled.payout_micro, 0);
+    }
+
+    #[test]
+    fn a_share_is_floored_in_units_so_the_remainder_stays_with_the_owner() {
+        let settled = settle_exit(
+            &ladder([3, 1, 1, 1, 1], [1_000_000; RUNG_COUNT]),
+            5_000_000,
+            0,
+            5_000,
+            SPREAD_COEF_BPS,
+            EXIT_NOW,
+        )
+        .expect("one whole unit moves");
+
+        assert_eq!(settled.units, [1, 0, 0, 0, 0]);
+        assert_eq!(settled.gross_value_micro, 1_000_000);
+        assert_eq!(settled.principal_micro, 2_500_000);
+    }
+
+    #[test]
+    fn a_share_outside_one_basis_point_to_the_whole_is_refused() {
+        for share_bps in [0, WHOLE + 1] {
+            assert_eq!(
+                error_code(settle_exit(
+                    &even_ladder(),
+                    THOUSAND_USDC,
+                    0,
+                    share_bps,
+                    SPREAD_COEF_BPS,
+                    EXIT_NOW
+                )),
+                u32::from(LadderError::InvalidExitShare),
+                "share {share_bps}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_share_that_moves_no_whole_unit_is_refused() {
+        assert_eq!(
+            error_code(settle_exit(
+                &even_ladder(),
+                THOUSAND_USDC,
+                0,
+                49,
+                SPREAD_COEF_BPS,
+                EXIT_NOW
+            )),
+            u32::from(LadderError::ExitMovesNothing)
+        );
+    }
+
+    /// Out of reach at the configured coefficient, but a payout below zero is a
+    /// quote no transfer can settle.
+    #[test]
+    fn a_spread_larger_than_what_the_fee_leaves_is_refused() {
+        let four_years = [RungValue {
+            units: 1,
+            price_micro: 1_000_000,
+            maturity_ts: EXIT_NOW + 1_461 * SECONDS_PER_DAY as i64,
+        }; RUNG_COUNT];
+
+        assert_eq!(
+            error_code(settle_exit(
+                &four_years,
+                5_000_000,
+                0,
+                WHOLE,
+                BPS_DENOMINATOR,
+                EXIT_NOW
+            )),
+            u32::from(LadderError::SpreadExceedsValue)
+        );
+    }
+
+    #[test]
+    fn a_rung_already_matured_exits_without_a_spread() {
+        let mut matured = even_ladder();
+        for rung in &mut matured {
+            rung.maturity_ts = EXIT_NOW - SECONDS_PER_DAY as i64;
+        }
+
+        let settled = settle_exit(&matured, THOUSAND_USDC, 0, WHOLE, SPREAD_COEF_BPS, EXIT_NOW)
+            .expect("a matured position settles");
+
+        assert_eq!(settled.wrd_days, 0);
+        assert_eq!(settled.spread_micro, 0);
+        assert_eq!(settled.payout_micro, THOUSAND_USDC);
     }
 }

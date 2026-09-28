@@ -182,7 +182,7 @@ pub fn open_ladder<'info>(
 /// Акаунти пропозиції приходять у `remaining_accounts`, тож належність
 /// програмі перевіряється тут, а не Anchor-обмеженням. Адреса програми
 /// береться з vault (FR-002, FR-021), а не з `declare_id!` сусіда.
-fn read_owned<T: AccountDeserialize>(
+pub(crate) fn read_owned<T: AccountDeserialize>(
     info: &AccountInfo<'_>,
     owner: &Pubkey,
     malformed: LadderError,

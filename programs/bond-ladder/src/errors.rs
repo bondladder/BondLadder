@@ -50,4 +50,12 @@ pub enum LadderError {
     BackstopBelowObligations,
     #[msg("A backstop transfer must move a positive amount")]
     ZeroBackstopAmount,
+    #[msg("An exit share must lie between one basis point and the whole position")]
+    InvalidExitShare,
+    #[msg("The exit share is too small to move a whole unit of any rung")]
+    ExitMovesNothing,
+    #[msg("The exit spread exceeds what the position is worth net of the fee")]
+    SpreadExceedsValue,
+    #[msg("The instrument account does not match the rung it is meant to price")]
+    RungInstrumentMismatch,
 }

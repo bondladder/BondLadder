@@ -51,4 +51,13 @@ pub mod bond_ladder {
     ) -> Result<()> {
         instructions::open_ladder::open_ladder(ctx, profile, deposit_micro)
     }
+
+    /// Every rung comes in `remaining_accounts` as a pair: the instrument that
+    /// prices it and the pool's holding of it.
+    pub fn exit_ladder<'info>(
+        ctx: Context<'_, '_, '_, 'info, ExitLadder<'info>>,
+        share_bps: u16,
+    ) -> Result<()> {
+        instructions::exit_ladder::exit_ladder(ctx, share_bps)
+    }
 }
