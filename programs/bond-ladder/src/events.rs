@@ -41,3 +41,40 @@ pub struct BackstopWithdrawn {
     pub backstop_free_usdc: u64,
     pub obligations_usdc: u64,
 }
+
+/// One rung's share of an exit. Price and rating are read at the exit rather
+/// than copied from the entry: they are what the pool took the risk on at.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ExitedRung {
+    pub instrument: Pubkey,
+    pub units: u64,
+    pub price_micro: u64,
+    pub notch: u8,
+    pub scale_version: u8,
+    /// A stale rating does not hold up an exit (FR-023), so its age rides
+    /// along for whoever reads the event to judge.
+    pub rated_at: i64,
+}
+
+/// Fee, spread and payout add up to the gross value, so the logs show where
+/// every micro-USDC of it went. The pool's free balance after the payout
+/// rides along, as it does on funding and withdrawal.
+#[event]
+#[derive(Clone)]
+pub struct LadderExited {
+    pub owner: Pubkey,
+    pub profile: RiskProfile,
+    pub share_bps: u16,
+    pub rungs: [ExitedRung; RUNG_COUNT],
+    pub gross_value_micro: u64,
+    pub fee_charged_micro: u64,
+    /// Owed by what remains of the position; nonzero only on a partial exit
+    /// too thin to cover the fee.
+    pub fee_carried_micro: u64,
+    pub wrd_days: u64,
+    pub spread_micro: u64,
+    pub payout_micro: u64,
+    pub principal_micro: u64,
+    pub backstop_free_usdc: u64,
+    pub exited_at: i64,
+}

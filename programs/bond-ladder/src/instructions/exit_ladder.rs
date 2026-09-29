@@ -2,15 +2,18 @@ use anchor_lang::prelude::*;
 use anchor_lang::system_program::{self, Allocate, Assign, CreateAccount};
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 use mock_issuer::state::Instrument;
+use rating_oracle::state::RatingRecord;
 
 use crate::errors::LadderError;
+use crate::events::{ExitedRung, LadderExited};
 use crate::instructions::open_ladder::read_owned;
 use crate::math::{self, RungValue};
 use crate::profiles::RUNG_COUNT;
 use crate::state::{BackstopHolding, Position, Rung, Vault, BPS_DENOMINATOR};
 
-/// The instrument that prices the rung and the pool's holding of it.
-const ACCOUNTS_PER_RUNG: usize = 2;
+/// The instrument that prices the rung, its rating for the event, and the
+/// pool's holding of it.
+const ACCOUNTS_PER_RUNG: usize = 3;
 
 /// `min_payout_micro` is the quote less the tolerance the client declared
 /// (FR-014). The fee keeps accruing and the remaining duration keeps
@@ -28,9 +31,11 @@ pub fn exit_ladder<'info>(
 
     let now_ts = Clock::get()?.unix_timestamp;
     let issuer_program = ctx.accounts.vault.issuer_program;
+    let rating_oracle = ctx.accounts.vault.rating_oracle;
     let held = ctx.accounts.position.rungs;
 
     let mut rungs = [RungValue::default(); RUNG_COUNT];
+    let mut exited = [ExitedRung::default(); RUNG_COUNT];
     for (index, chunk) in ctx
         .remaining_accounts
         .chunks_exact(ACCOUNTS_PER_RUNG)
@@ -43,7 +48,24 @@ pub fn exit_ladder<'info>(
             held[index].instrument,
             LadderError::RungInstrumentMismatch
         );
+        // Freshness is not required: a stale oracle must not hold anyone in
+        // their position (FR-023). The event reports the rating's age instead.
+        let record: RatingRecord =
+            read_owned(&chunk[1], &rating_oracle, LadderError::RatingUnusable)?;
+        require_keys_eq!(
+            record.instrument_mint,
+            held[index].instrument,
+            LadderError::RatingMintMismatch
+        );
 
+        exited[index] = ExitedRung {
+            instrument: instrument.mint,
+            units: 0,
+            price_micro: instrument.price_micro,
+            notch: record.notch,
+            scale_version: record.scale_version,
+            rated_at: record.updated_at,
+        };
         rungs[index] = RungValue {
             units: held[index].amount,
             price_micro: instrument.price_micro,
@@ -90,9 +112,10 @@ pub fn exit_ladder<'info>(
         .chunks_exact(ACCOUNTS_PER_RUNG)
         .enumerate()
     {
+        exited[index].units = settled.units[index];
         if settled.units[index] > 0 {
             credit_holding(
-                &chunk[1],
+                &chunk[2],
                 &held[index],
                 settled.units[index],
                 &ctx.accounts.owner,
@@ -115,6 +138,22 @@ pub fn exit_ladder<'info>(
         ),
         settled.payout_micro,
     )?;
+
+    emit!(LadderExited {
+        owner: ctx.accounts.owner.key(),
+        profile: ctx.accounts.position.profile,
+        share_bps,
+        rungs: exited,
+        gross_value_micro: settled.gross_value_micro,
+        fee_charged_micro: settled.fee_charged_micro,
+        fee_carried_micro: settled.fee_carried_micro,
+        wrd_days: settled.wrd_days,
+        spread_micro: settled.spread_micro,
+        payout_micro: settled.payout_micro,
+        principal_micro: settled.principal_micro,
+        backstop_free_usdc: ctx.accounts.vault.backstop_free_usdc,
+        exited_at: now_ts,
+    });
 
     if share_bps == BPS_DENOMINATOR {
         return ctx
