@@ -12,9 +12,14 @@ use crate::state::{BackstopHolding, Position, Rung, Vault, BPS_DENOMINATOR};
 /// The instrument that prices the rung and the pool's holding of it.
 const ACCOUNTS_PER_RUNG: usize = 2;
 
+/// `min_payout_micro` is the quote less the tolerance the client declared
+/// (FR-014). The fee keeps accruing and the remaining duration keeps
+/// shrinking between the quote and the signature, so the payout is never
+/// expected to match the quote exactly.
 pub fn exit_ladder<'info>(
     ctx: Context<'_, '_, '_, 'info, ExitLadder<'info>>,
     share_bps: u16,
+    min_payout_micro: u64,
 ) -> Result<()> {
     require!(
         ctx.remaining_accounts.len() == RUNG_COUNT * ACCOUNTS_PER_RUNG,
@@ -66,7 +71,14 @@ pub fn exit_ladder<'info>(
         ctx.accounts.vault.spread_coef_bps,
         now_ts,
     )?;
+    require_gte!(
+        settled.payout_micro,
+        min_payout_micro,
+        LadderError::QuoteDrift
+    );
 
+    // A pool short of the payout refuses the exit whole rather than paying
+    // what it has: a smaller exit is one the owner has to choose (FR-015).
     ctx.accounts.vault.take_exit(
         settled.payout_micro,
         settled.principal_micro,

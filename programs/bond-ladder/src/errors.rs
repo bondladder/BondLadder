@@ -58,4 +58,6 @@ pub enum LadderError {
     SpreadExceedsValue,
     #[msg("The instrument account does not match the rung it is meant to price")]
     RungInstrumentMismatch,
+    #[msg("The exit would pay less than the floor signed for with the quote")]
+    QuoteDrift,
 }

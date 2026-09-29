@@ -57,7 +57,8 @@ pub mod bond_ladder {
     pub fn exit_ladder<'info>(
         ctx: Context<'_, '_, '_, 'info, ExitLadder<'info>>,
         share_bps: u16,
+        min_payout_micro: u64,
     ) -> Result<()> {
-        instructions::exit_ladder::exit_ladder(ctx, share_bps)
+        instructions::exit_ladder::exit_ladder(ctx, share_bps, min_payout_micro)
     }
 }

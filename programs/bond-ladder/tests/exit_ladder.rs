@@ -1,6 +1,7 @@
 //! The instant exit end to end (FR-012, FR-031): the pool pays USDC out of its
 //! free balance, takes the instruments on as holdings, and what remains of a
-//! partial exit is the same ladder, only smaller.
+//! partial exit is the same ladder, only smaller. An exit the owner did not
+//! sign for is refused whole (FR-014, FR-015).
 
 use {
     anchor_lang::{AccountDeserialize, AccountSerialize, InstructionData, Space},
@@ -52,7 +53,9 @@ const QUARTER_EXIT_PAYOUT: u64 = 241_081_700;
 
 const ERR_ANCHOR_CONSTRAINT_SEEDS: u32 = 2006;
 const ERR_FOREIGN_ACCOUNT_OWNER: u32 = 6018;
+const ERR_BACKSTOP_INSUFFICIENT: u32 = 6021;
 const ERR_RUNG_INSTRUMENT_MISMATCH: u32 = 6027;
+const ERR_QUOTE_DRIFT: u32 = 6028;
 
 fn program_id() -> Pubkey {
     Pubkey::new_from_array(bond_ladder::ID.to_bytes())
@@ -171,7 +174,7 @@ fn token_account(owner: Pubkey, amount: u64) -> Account {
     })
 }
 
-fn vault_account(paused: bool) -> Account {
+fn vault_account(paused: bool, backstop_free_usdc: u64) -> Account {
     let (_, bump) = vault_pda();
 
     owned_by(
@@ -186,7 +189,7 @@ fn vault_account(paused: bool) -> Account {
             min_deposit: 100_000_000,
             capacity_usdc: 10 * THOUSAND_USDC,
             total_principal_usdc: OTHER_POSITIONS_PRINCIPAL + THOUSAND_USDC,
-            backstop_free_usdc: POOL,
+            backstop_free_usdc,
             backstop_locked_value: 0,
             paused,
             bump,
@@ -228,13 +231,17 @@ fn position_account() -> Account {
 }
 
 fn instrument_account(index: usize, owner: Pubkey) -> Account {
+    priced_instrument(index, owner, UNIT_PRICE)
+}
+
+fn priced_instrument(index: usize, owner: Pubkey, price_micro: u64) -> Account {
     owned_by(
         &Instrument {
             mint: anchor_key(instrument_mint(index)),
             issuer_id: [index as u8; 16],
             maturity_ts: maturity(index),
             coupon_bps: 400,
-            price_micro: UNIT_PRICE,
+            price_micro,
             bump: 255,
         },
         owner,
@@ -260,6 +267,7 @@ fn holding_account(index: usize, amount: u64) -> Account {
 fn exit_ix(
     signer: Pubkey,
     share_bps: u16,
+    min_payout_micro: u64,
     rung_pairs: [(Pubkey, Pubkey); RUNG_COUNT],
 ) -> Instruction {
     let (vault, _) = vault_pda();
@@ -281,7 +289,11 @@ fn exit_ix(
 
     Instruction::new_with_bytes(
         program_id(),
-        &bond_ladder::instruction::ExitLadder { share_bps }.data(),
+        &bond_ladder::instruction::ExitLadder {
+            share_bps,
+            min_payout_micro,
+        }
+        .data(),
         metas,
     )
 }
@@ -296,7 +308,7 @@ fn accounts() -> Vec<(Pubkey, Account)> {
     let (position, _) = position_pda();
 
     let mut accounts = vec![
-        (vault, vault_account(false)),
+        (vault, vault_account(false, POOL)),
         (position, position_account()),
         (OWNER, Account::new(OWNER_LAMPORTS, 0, &system_program_id())),
         (
@@ -354,7 +366,7 @@ fn a_full_exit_pays_the_quote_hands_the_pool_every_unit_and_closes_the_position(
     let (position, _) = position_pda();
 
     let result = mollusk.process_and_validate_instruction(
-        &exit_ix(OWNER, 10_000, rung_pairs()),
+        &exit_ix(OWNER, 10_000, FULL_EXIT_PAYOUT, rung_pairs()),
         &accounts(),
         &[Check::success()],
     );
@@ -410,7 +422,7 @@ fn a_partial_exit_leaves_the_same_ladder_smaller_and_settles_the_fee() {
     let (position, _) = position_pda();
 
     let result = mollusk.process_and_validate_instruction(
-        &exit_ix(OWNER, 2_500, rung_pairs()),
+        &exit_ix(OWNER, 2_500, QUARTER_EXIT_PAYOUT, rung_pairs()),
         &accounts(),
         &[Check::success()],
     );
@@ -452,7 +464,7 @@ fn a_holding_the_pool_already_has_grows_by_the_units_taken() {
     }
 
     let result = mollusk.process_and_validate_instruction(
-        &exit_ix(OWNER, 2_500, rung_pairs()),
+        &exit_ix(OWNER, 2_500, QUARTER_EXIT_PAYOUT, rung_pairs()),
         &set,
         &[Check::success()],
     );
@@ -476,7 +488,7 @@ fn lamports_sent_to_a_holding_address_in_advance_do_not_block_the_exit() {
     );
 
     let result = mollusk.process_and_validate_instruction(
-        &exit_ix(OWNER, 10_000, rung_pairs()),
+        &exit_ix(OWNER, 10_000, FULL_EXIT_PAYOUT, rung_pairs()),
         &set,
         &[Check::success()],
     );
@@ -492,8 +504,8 @@ fn a_paused_vault_still_lets_the_owner_out() {
     let (vault, _) = vault_pda();
 
     let result = mollusk.process_and_validate_instruction(
-        &exit_ix(OWNER, 10_000, rung_pairs()),
-        &replacing(accounts(), vault, vault_account(true)),
+        &exit_ix(OWNER, 10_000, FULL_EXIT_PAYOUT, rung_pairs()),
+        &replacing(accounts(), vault, vault_account(true, POOL)),
         &[Check::success()],
     );
 
@@ -506,7 +518,7 @@ fn a_stranger_cannot_exit_someone_elses_position() {
     let mollusk = setup();
 
     mollusk.process_and_validate_instruction(
-        &exit_ix(STRANGER, 10_000, rung_pairs()),
+        &exit_ix(STRANGER, 10_000, FULL_EXIT_PAYOUT, rung_pairs()),
         &accounts(),
         &[Check::err(ProgramError::Custom(
             ERR_ANCHOR_CONSTRAINT_SEEDS,
@@ -521,7 +533,7 @@ fn a_price_from_an_account_the_issuer_does_not_own_is_refused() {
     let mollusk = setup();
 
     mollusk.process_and_validate_instruction(
-        &exit_ix(OWNER, 10_000, rung_pairs()),
+        &exit_ix(OWNER, 10_000, FULL_EXIT_PAYOUT, rung_pairs()),
         &replacing(
             accounts(),
             instrument_pda(3),
@@ -541,7 +553,7 @@ fn an_instrument_priced_against_the_wrong_rung_is_refused() {
     }
 
     mollusk.process_and_validate_instruction(
-        &exit_ix(OWNER, 10_000, pairs),
+        &exit_ix(OWNER, 10_000, FULL_EXIT_PAYOUT, pairs),
         &accounts(),
         &[Check::err(ProgramError::Custom(
             ERR_RUNG_INSTRUMENT_MISMATCH,
@@ -556,10 +568,99 @@ fn a_holding_of_another_instrument_is_refused() {
     pairs[0].1 = holding_pda(1).0;
 
     mollusk.process_and_validate_instruction(
-        &exit_ix(OWNER, 10_000, pairs),
+        &exit_ix(OWNER, 10_000, FULL_EXIT_PAYOUT, pairs),
         &accounts(),
         &[Check::err(ProgramError::Custom(
             ERR_ANCHOR_CONSTRAINT_SEEDS,
         ))],
     );
+}
+
+/// FR-014: a price that fell between the quote and the signature takes the
+/// payout below the floor the owner signed for.
+#[test]
+fn a_payout_below_the_signed_floor_is_refused() {
+    let mollusk = setup();
+
+    mollusk.process_and_validate_instruction(
+        &exit_ix(OWNER, 10_000, FULL_EXIT_PAYOUT, rung_pairs()),
+        &replacing(
+            accounts(),
+            instrument_pda(4),
+            priced_instrument(4, issuer_id(), UNIT_PRICE - 1_000),
+        ),
+        &[Check::err(ProgramError::Custom(ERR_QUOTE_DRIFT))],
+    );
+}
+
+/// The floor guards one side only: drifting in the owner's favour is not a
+/// reason to refuse.
+#[test]
+fn a_payout_above_the_signed_floor_goes_through() {
+    let mollusk = setup();
+
+    let result = mollusk.process_and_validate_instruction(
+        &exit_ix(OWNER, 10_000, FULL_EXIT_PAYOUT, rung_pairs()),
+        &replacing(
+            accounts(),
+            instrument_pda(4),
+            priced_instrument(4, issuer_id(), UNIT_PRICE + 1_000),
+        ),
+        &[Check::success()],
+    );
+
+    assert!(token_balance(&result, &OWNER_USDC) > FULL_EXIT_PAYOUT);
+}
+
+/// FR-015: a pool one micro-USDC short of the exit refuses it rather than
+/// paying out what it has, while the smaller exit the owner chose outright
+/// still goes through. The refused exit leaves the accounts as they were
+/// because the runtime discards a failed instruction's writes.
+#[test]
+fn an_exit_the_pool_cannot_cover_is_refused_rather_than_filled_in_part() {
+    let mollusk = setup();
+    let (vault, _) = vault_pda();
+    let short = replacing(
+        replacing(
+            accounts(),
+            vault,
+            vault_account(false, FULL_EXIT_PAYOUT - 1),
+        ),
+        backstop_usdc(),
+        token_account(vault, FULL_EXIT_PAYOUT - 1),
+    );
+
+    mollusk.process_and_validate_instruction(
+        &exit_ix(OWNER, 10_000, 0, rung_pairs()),
+        &short,
+        &[Check::err(ProgramError::Custom(ERR_BACKSTOP_INSUFFICIENT))],
+    );
+
+    let result = mollusk.process_and_validate_instruction(
+        &exit_ix(OWNER, 2_500, QUARTER_EXIT_PAYOUT, rung_pairs()),
+        &short,
+        &[Check::success()],
+    );
+    assert_eq!(token_balance(&result, &OWNER_USDC), QUARTER_EXIT_PAYOUT);
+}
+
+#[test]
+fn a_pool_holding_exactly_the_payout_pays_it_out() {
+    let mollusk = setup();
+    let (vault, _) = vault_pda();
+    let exact = replacing(
+        replacing(accounts(), vault, vault_account(false, FULL_EXIT_PAYOUT)),
+        backstop_usdc(),
+        token_account(vault, FULL_EXIT_PAYOUT),
+    );
+
+    let result = mollusk.process_and_validate_instruction(
+        &exit_ix(OWNER, 10_000, FULL_EXIT_PAYOUT, rung_pairs()),
+        &exact,
+        &[Check::success()],
+    );
+
+    assert_eq!(token_balance(&result, &backstop_usdc()), 0);
+    let pool: Vault = stored(&result, &vault);
+    assert_eq!(pool.backstop_free_usdc, 0);
 }
