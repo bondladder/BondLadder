@@ -4,12 +4,14 @@ import {
   accrueFee,
   BPS_DENOMINATOR,
   DAYS_PER_FOUR_YEARS,
+  ExitRefusedError,
   exitQuote,
   exitSpread,
   MathOverflowError,
   type RungValue,
   SECONDS_PER_DAY,
   SECONDS_PER_YEAR,
+  settleExit,
   weightedRemainingDays,
 } from './math'
 
@@ -340,6 +342,113 @@ describe('exit quote breakdown', () => {
 
     expect(() =>
       exitQuote({ rungs: tooRich, nowTs: NOW_TS, feeDueMicro: 0n, spreadCoefBps: SPREAD_COEF_BPS }),
+    ).toThrow(MathOverflowError)
+  })
+})
+
+function settleInputOf(
+  entry: (typeof fixture.settle)[number] | (typeof fixture.settleRefused)[number],
+) {
+  return {
+    rungs: rungsOf(entry.rungs),
+    principalMicro: BigInt(entry.principalMicro),
+    feeDueMicro: BigInt(entry.feeDueMicro),
+    shareBps: entry.shareBps,
+    spreadCoefBps: entry.spreadCoefBps,
+    nowTs: BigInt(entry.nowTs),
+  }
+}
+
+describe('exit settlement', () => {
+  it('settles every case of the shared fixture as the program does', () => {
+    expect(fixture.settle).toHaveLength(8)
+
+    for (const entry of fixture.settle) {
+      const { expected } = entry
+
+      expect(settleExit(settleInputOf(entry)), entry.case).toEqual({
+        units: expected.units.map(BigInt),
+        grossValueMicro: BigInt(expected.grossValueMicro),
+        wrdDays: BigInt(expected.wrdDays),
+        feeChargedMicro: BigInt(expected.feeChargedMicro),
+        feeCarriedMicro: BigInt(expected.feeCarriedMicro),
+        spreadMicro: BigInt(expected.spreadMicro),
+        payoutMicro: BigInt(expected.payoutMicro),
+        principalMicro: BigInt(expected.principalMicro),
+      })
+    }
+  })
+
+  it('refuses every case the program refuses, under the same name', () => {
+    expect(fixture.settleRefused).toHaveLength(4)
+
+    for (const entry of fixture.settleRefused) {
+      let refusal: unknown = null
+      try {
+        settleExit(settleInputOf(entry))
+      } catch (error) {
+        refusal = error
+      }
+
+      expect(refusal, entry.case).toBeInstanceOf(ExitRefusedError)
+      expect((refusal as ExitRefusedError).reason, entry.case).toBe(entry.refusal)
+    }
+  })
+
+  it('prices a full exit exactly as the quote of the whole position', () => {
+    for (const feeDueMicro of [0n, 12_345_678n, 6_000_000_000n]) {
+      const settled = settleExit({
+        rungs: GRID_POSITION,
+        principalMicro: 5_000_000_000n,
+        feeDueMicro,
+        shareBps: 10_000,
+        spreadCoefBps: SPREAD_COEF_BPS,
+        nowTs: NOW_TS,
+      })
+      const quote = exitQuote({
+        rungs: GRID_POSITION,
+        nowTs: NOW_TS,
+        feeDueMicro,
+        spreadCoefBps: SPREAD_COEF_BPS,
+      })
+
+      expect(settled.payoutMicro, `${feeDueMicro}`).toBe(quote.payoutMicro)
+      expect(settled.spreadMicro, `${feeDueMicro}`).toBe(quote.spreadMicro)
+      expect(settled.wrdDays, `${feeDueMicro}`).toBe(quote.wrdDays)
+    }
+  })
+
+  it('accounts for every micro-USDC of the slice and of the fee', () => {
+    for (const shareBps of [2_500, 5_000, 9_999, 10_000]) {
+      for (const feeDueMicro of [0n, 7n, 300_000_000n, 9_000_000_000n]) {
+        const settled = settleExit({
+          rungs: GRID_POSITION,
+          principalMicro: 5_000_000_000n,
+          feeDueMicro,
+          shareBps,
+          spreadCoefBps: SPREAD_COEF_BPS,
+          nowTs: NOW_TS,
+        })
+        const label = `${shareBps} bps, fee ${feeDueMicro}`
+
+        expect(settled.payoutMicro + settled.spreadMicro + settled.feeChargedMicro, label).toBe(
+          settled.grossValueMicro,
+        )
+        expect(settled.feeChargedMicro + settled.feeCarriedMicro, label).toBe(feeDueMicro)
+      }
+    }
+  })
+
+  it('refuses a principal that does not fit u64', () => {
+    expect(() =>
+      settleExit({
+        rungs: GRID_POSITION,
+        principalMicro: U64_MAX + 1n,
+        feeDueMicro: 0n,
+        shareBps: 10_000,
+        spreadCoefBps: SPREAD_COEF_BPS,
+        nowTs: NOW_TS,
+      }),
     ).toThrow(MathOverflowError)
   })
 })

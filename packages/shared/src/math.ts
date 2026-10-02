@@ -183,3 +183,86 @@ export function exitQuote(input: ExitQuoteInput): ExitQuote {
     payoutMicro: netValueMicro - spreadMicro,
   }
 }
+
+/** The program's refusals of an exit, by the names `LadderError` gives them. */
+export type ExitRefusal = 'InvalidExitShare' | 'ExitMovesNothing' | 'SpreadExceedsValue'
+
+export class ExitRefusedError extends Error {
+  readonly reason: ExitRefusal
+
+  constructor(reason: ExitRefusal) {
+    super(`the program refuses this exit: ${reason}`)
+    this.name = 'ExitRefusedError'
+    this.reason = reason
+  }
+}
+
+export interface SettleExitInput {
+  readonly rungs: readonly RungValue[]
+  readonly principalMicro: bigint
+  readonly feeDueMicro: bigint
+  readonly shareBps: number
+  readonly spreadCoefBps: number
+  readonly nowTs: bigint
+}
+
+/** Mirror of `math::ExitSettlement`: what `exit_ladder` moves for a share. */
+export interface ExitSettlement {
+  readonly units: readonly bigint[]
+  readonly grossValueMicro: bigint
+  readonly wrdDays: bigint
+  readonly feeChargedMicro: bigint
+  readonly feeCarriedMicro: bigint
+  readonly spreadMicro: bigint
+  readonly payoutMicro: bigint
+  readonly principalMicro: bigint
+}
+
+function shareOf(amount: bigint, shareBps: number): bigint {
+  return (amount * BigInt(shareBps)) / BPS_DENOMINATOR
+}
+
+/**
+ * Mirror of `math::settle_exit`. Only the value is shared out: the whole fee
+ * due is charged against the slice (FR-020), so a partial exit is not a scaled
+ * full quote, and the part a thin slice cannot cover stays owed.
+ */
+export function settleExit(input: SettleExitInput): ExitSettlement {
+  requireWidth(fitsU16(input.shareBps), 'exit share does not fit u16')
+  requireWidth(fitsU64(input.principalMicro), 'principal does not fit u64')
+  requireWidth(fitsU64(input.feeDueMicro), 'fee due does not fit u64')
+  if (input.shareBps <= 0 || BigInt(input.shareBps) > BPS_DENOMINATOR) {
+    throw new ExitRefusedError('InvalidExitShare')
+  }
+
+  const leaving = input.rungs.map((rung) => {
+    requireWidth(fitsU64(rung.units), 'rung units do not fit u64')
+
+    return { ...rung, units: shareOf(rung.units, input.shareBps) }
+  })
+  if (leaving.every((rung) => rung.units === 0n)) {
+    throw new ExitRefusedError('ExitMovesNothing')
+  }
+
+  const grossValueMicro = leaving.reduce((sum, rung) => sum + rung.units * rung.priceMicro, 0n)
+  requireWidth(fitsU64(grossValueMicro), 'position value does not fit u64')
+
+  const feeChargedMicro = input.feeDueMicro < grossValueMicro ? input.feeDueMicro : grossValueMicro
+  const netValueMicro = grossValueMicro - feeChargedMicro
+  const wrdDays = weightedRemainingDays(leaving, input.nowTs)
+  const spreadMicro = exitSpread(grossValueMicro, feeChargedMicro, input.spreadCoefBps, wrdDays)
+  if (spreadMicro > netValueMicro) {
+    throw new ExitRefusedError('SpreadExceedsValue')
+  }
+
+  return {
+    units: leaving.map((rung) => rung.units),
+    grossValueMicro,
+    wrdDays,
+    feeChargedMicro,
+    feeCarriedMicro: input.feeDueMicro - feeChargedMicro,
+    spreadMicro,
+    payoutMicro: netValueMicro - spreadMicro,
+    principalMicro: shareOf(input.principalMicro, input.shareBps),
+  }
+}

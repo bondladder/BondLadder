@@ -882,6 +882,74 @@ mod tests {
         );
     }
 
+    fn settle_case(entry: &serde_json::Value) -> Result<ExitSettlement> {
+        settle_exit(
+            &rungs_of(entry),
+            wide(&entry["principalMicro"]),
+            wide(&entry["feeDueMicro"]),
+            bps(&entry["shareBps"]),
+            bps(&entry["spreadCoefBps"]),
+            stamp(&entry["nowTs"]),
+        )
+    }
+
+    #[test]
+    fn settlements_match_the_shared_fixture() {
+        let fixture = fixture();
+        let cases = fixture["settle"].as_array().expect("settle is an array");
+        assert!(!cases.is_empty());
+
+        for entry in cases {
+            let expected = &entry["expected"];
+            let listed = expected["units"].as_array().expect("units is an array");
+            let mut units = [0u64; RUNG_COUNT];
+            for (slot, moved) in units.iter_mut().zip(listed) {
+                *slot = wide(moved);
+            }
+
+            assert_eq!(
+                settle_case(entry).expect("a fixture case settles"),
+                ExitSettlement {
+                    units,
+                    gross_value_micro: wide(&expected["grossValueMicro"]),
+                    wrd_days: wide(&expected["wrdDays"]),
+                    fee_charged_micro: wide(&expected["feeChargedMicro"]),
+                    fee_carried_micro: wide(&expected["feeCarriedMicro"]),
+                    spread_micro: wide(&expected["spreadMicro"]),
+                    payout_micro: wide(&expected["payoutMicro"]),
+                    principal_micro: wide(&expected["principalMicro"]),
+                },
+                "{}",
+                case_name(entry)
+            );
+        }
+    }
+
+    #[test]
+    fn settle_refusals_match_the_shared_fixture() {
+        let fixture = fixture();
+        let cases = fixture["settleRefused"]
+            .as_array()
+            .expect("settleRefused is an array");
+        assert!(!cases.is_empty());
+
+        for entry in cases {
+            let refusal = match entry["refusal"].as_str().expect("refusal is a string") {
+                "InvalidExitShare" => LadderError::InvalidExitShare,
+                "ExitMovesNothing" => LadderError::ExitMovesNothing,
+                "SpreadExceedsValue" => LadderError::SpreadExceedsValue,
+                other => panic!("unknown refusal {other} in the fixture"),
+            };
+
+            assert_eq!(
+                error_code(settle_case(entry)),
+                u32::from(refusal),
+                "{}",
+                case_name(entry)
+            );
+        }
+    }
+
     #[test]
     fn a_rung_already_matured_exits_without_a_spread() {
         let mut matured = even_ladder();

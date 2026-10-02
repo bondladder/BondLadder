@@ -68,13 +68,69 @@
       }
     ]
   },
+  "exitLadder": {
+    "discriminator": "be996b40fe6c95d7",
+    "accounts": [
+      {
+        "name": "vault",
+        "signer": false,
+        "writable": true
+      },
+      {
+        "name": "position",
+        "signer": false,
+        "writable": true
+      },
+      {
+        "name": "owner",
+        "signer": true,
+        "writable": true
+      },
+      {
+        "name": "ownerUsdc",
+        "signer": false,
+        "writable": true
+      },
+      {
+        "name": "backstopUsdc",
+        "signer": false,
+        "writable": true
+      },
+      {
+        "name": "tokenProgram",
+        "signer": false,
+        "writable": false
+      },
+      {
+        "name": "systemProgram",
+        "signer": false,
+        "writable": false
+      }
+    ],
+    "accountsPerRung": 3,
+    "cases": [
+      {
+        "case": "wholeAtTheQuoteFloor",
+        "shareBps": 10000,
+        "minPayoutMicro": "982043914",
+        "data": "be996b40fe6c95d710270acd883a00000000"
+      },
+      {
+        "case": "oneBasisPointAtTheLimit",
+        "shareBps": 1,
+        "minPayoutMicro": "18446744073709551615",
+        "data": "be996b40fe6c95d70100ffffffffffffffff"
+      }
+    ]
+  },
   "seeds": {
     "vault": "vault",
     "position": "position",
     "oracle": "oracle",
     "issuer": "issuer",
     "instrument": "instrument",
-    "rating": "rating"
+    "rating": "rating",
+    "backstop": "backstop"
   },
   "profileSeedBytes": [
     {

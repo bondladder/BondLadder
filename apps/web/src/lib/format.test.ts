@@ -5,9 +5,10 @@ import {
     microFromUsdc,
     notchLabel,
     percentFromBps,
+    signedPercentFromPpm,
     signedUsdcFromMicro,
+    solFromLamports,
     termLabel,
-    usdc,
     usdcFromMicro,
     weightedNotchLabel,
 } from './format';
@@ -89,12 +90,6 @@ describe('termLabel', () => {
     });
 });
 
-describe('usdc', () => {
-    it('still formats the mock’s plain numbers for the screens on mocks', () => {
-        expect(usdc(1004.35)).toBe('1,004.35 USDC');
-    });
-});
-
 describe('microFromUsdc', () => {
     it('reads a plain amount', () => {
         expect(microFromUsdc('1000')).toBe(1_000_000_000n);
@@ -152,5 +147,29 @@ describe('signedUsdcFromMicro', () => {
 
     it('leaves nothing unsigned', () => {
         expect(signedUsdcFromMicro(0n)).toBe('0.00 USDC');
+    });
+});
+
+describe('solFromLamports', () => {
+    it('keeps every lamport of a small rent', () => {
+        expect(solFromLamports(1_287_600n)).toBe('0.0012876 SOL');
+        expect(solFromLamports(1n)).toBe('0.000000001 SOL');
+    });
+
+    it('drops the point on whole SOL', () => {
+        expect(solFromLamports(5_000_000_000n)).toBe('5 SOL');
+        expect(solFromLamports(0n)).toBe('0 SOL');
+    });
+});
+
+describe('signedPercentFromPpm', () => {
+    it('prints parts per million as a signed percent to four places', () => {
+        expect(signedPercentFromPpm(100n)).toBe('+ 0.0100%');
+        expect(signedPercentFromPpm(-1_000n)).toBe('− 0.1000%');
+        expect(signedPercentFromPpm(1_234_567n)).toBe('+ 123.4567%');
+    });
+
+    it('gives no sign to no difference', () => {
+        expect(signedPercentFromPpm(0n)).toBe('0.0000%');
     });
 });

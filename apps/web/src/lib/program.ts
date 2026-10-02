@@ -12,11 +12,13 @@
 import {
     decodePosition,
     decodeVault,
+    exitLadderData,
     openLadderData,
     type Position,
     profileSeedByte,
     type RiskProfile,
     RUNG_COUNT,
+    SEED_BACKSTOP,
     SEED_INSTRUMENT,
     SEED_ISSUER,
     SEED_ORACLE,
@@ -32,6 +34,7 @@ import {
     SystemProgram,
     Transaction,
     TransactionInstruction,
+    VersionedTransaction,
 } from '@solana/web3.js';
 import { Buffer } from 'buffer';
 
@@ -288,4 +291,98 @@ export async function readTokenAccount(mint: PublicKey, owner: PublicKey): Promi
     const info = await connection().getAccountInfo(associatedTokenAddress(mint, owner));
 
     return info === null ? null : info.data;
+}
+
+/** Discriminator, instrument, amount, maturity and bump of `BackstopHolding`. */
+export const BACKSTOP_HOLDING_SPACE = 8 + 32 + 8 + 8 + 1;
+
+export function backstopHoldingAddress(mint: PublicKey): PublicKey {
+    return pda([SEED_BACKSTOP, mint.toBytes()], bondLadderProgramId());
+}
+
+/** The three accounts of a rung in the order `exit_ladder` reads them. */
+export interface ExitRungAccounts {
+    readonly instrument: PublicKey;
+    readonly rating: PublicKey;
+    readonly holding: PublicKey;
+}
+
+export interface ExitInput {
+    readonly vault: VaultState;
+    readonly owner: PublicKey;
+    readonly profile: RiskProfile;
+    readonly shareBps: number;
+    readonly minPayoutMicro: bigint;
+    readonly rungs: readonly ExitRungAccounts[];
+}
+
+export function exitLadderInstruction(input: ExitInput): TransactionInstruction {
+    if (input.rungs.length !== RUNG_COUNT) {
+        throw new ProgramClientError(`an exit needs ${RUNG_COUNT} rungs, not ${input.rungs.length}`);
+    }
+
+    const usdcMint = new PublicKey(input.vault.state.usdcMint);
+    const keys: AccountMeta[] = [
+        { pubkey: input.vault.address, isWritable: true, isSigner: false },
+        { pubkey: positionAddress(input.owner, input.profile), isWritable: true, isSigner: false },
+        { pubkey: input.owner, isWritable: true, isSigner: true },
+        { pubkey: associatedTokenAddress(usdcMint, input.owner), isWritable: true, isSigner: false },
+        { pubkey: associatedTokenAddress(usdcMint, input.vault.address), isWritable: true, isSigner: false },
+        { pubkey: TOKEN_PROGRAM_ID, isWritable: false, isSigner: false },
+        { pubkey: SystemProgram.programId, isWritable: false, isSigner: false },
+        ...input.rungs.flatMap((rung) => [
+            { pubkey: rung.instrument, isWritable: false, isSigner: false },
+            { pubkey: rung.rating, isWritable: false, isSigner: false },
+            { pubkey: rung.holding, isWritable: true, isSigner: false },
+        ]),
+    ];
+
+    return new TransactionInstruction({
+        programId: bondLadderProgramId(),
+        keys,
+        data: Buffer.from(exitLadderData(input.shareBps, input.minPayoutMicro)),
+    });
+}
+
+export async function buildExit(input: ExitInput): Promise<Uint8Array> {
+    return serialize(input.owner, [exitLadderInstruction(input)]);
+}
+
+/**
+ * The transaction as the program would run it now, before any wallet sees it.
+ * Wallets run the same preflight but report a refusal in their own words, if at
+ * all; this keeps the program's error code, which is what names the reason.
+ */
+export async function simulate(transaction: Uint8Array): Promise<unknown> {
+    const { value } = await connection().simulateTransaction(VersionedTransaction.deserialize(transaction), {
+        sigVerify: false,
+        replaceRecentBlockhash: true,
+    });
+
+    return value.err;
+}
+
+const CONFIRM_POLL_MS = 500;
+const CONFIRM_TIMEOUT_MS = 60_000;
+
+/**
+ * Polls rather than subscribes: the public devnet endpoint drops WebSocket
+ * connections, and that failure arrives as a socket event no `catch` sees.
+ * Resolves with the transaction's error, `null` once it confirmed clean.
+ */
+export async function awaitSignature(signature: string): Promise<unknown> {
+    const deadline = Date.now() + CONFIRM_TIMEOUT_MS;
+
+    while (Date.now() < deadline) {
+        const { value } = await connection().getSignatureStatuses([signature]);
+        const status = value[0];
+        if (status != null && (status.err !== null || status.confirmationStatus !== 'processed')) {
+            return status.err;
+        }
+        await new Promise((resolve) => setTimeout(resolve, CONFIRM_POLL_MS));
+    }
+
+    throw new ProgramClientError(
+        `${signature} was not confirmed within ${CONFIRM_TIMEOUT_MS / 1000} s. It may still land — check the explorer.`,
+    );
 }

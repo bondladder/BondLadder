@@ -403,5 +403,513 @@
       "spreadCoefBps": 10000,
       "wrdDays": "1461"
     }
+  ],
+  "settle": [
+    {
+      "case": "fullExitOfAnEvenLadder",
+      "rungs": [
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1807862400"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1815811200"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1823673600"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1831536000"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1847347200"
+        }
+      ],
+      "principalMicro": "1000000000",
+      "feeDueMicro": "1000000",
+      "shareBps": 10000,
+      "spreadCoefBps": 200,
+      "nowTs": "1800000000",
+      "expected": {
+        "units": ["200", "200", "200", "200", "200"],
+        "grossValueMicro": "1000000000",
+        "wrdDays": "292",
+        "feeChargedMicro": "1000000",
+        "feeCarriedMicro": "0",
+        "spreadMicro": "15973059",
+        "payoutMicro": "983026941",
+        "principalMicro": "1000000000"
+      }
+    },
+    {
+      "case": "halfOfAnUnevenLadderPaysTheWholeFee",
+      "rungs": [
+        {
+          "units": "201",
+          "priceMicro": "990000",
+          "maturityTs": "1807862400"
+        },
+        {
+          "units": "199",
+          "priceMicro": "985000",
+          "maturityTs": "1815811200"
+        },
+        {
+          "units": "203",
+          "priceMicro": "1000000",
+          "maturityTs": "1823673600"
+        },
+        {
+          "units": "197",
+          "priceMicro": "995000",
+          "maturityTs": "1831536000"
+        },
+        {
+          "units": "205",
+          "priceMicro": "1010000",
+          "maturityTs": "1847347200"
+        }
+      ],
+      "principalMicro": "999999999",
+      "feeDueMicro": "2345678",
+      "shareBps": 5000,
+      "spreadCoefBps": 200,
+      "nowTs": "1800000000",
+      "expected": {
+        "units": ["100", "99", "101", "98", "102"],
+        "grossValueMicro": "498045000",
+        "wrdDays": "294",
+        "feeChargedMicro": "2345678",
+        "feeCarriedMicro": "0",
+        "spreadMicro": "7980046",
+        "payoutMicro": "487719276",
+        "principalMicro": "499999999"
+      }
+    },
+    {
+      "case": "thinSliceCarriesTheFeeItCannotCover",
+      "rungs": [
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1807862400"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1815811200"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1823673600"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1831536000"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1847347200"
+        }
+      ],
+      "principalMicro": "1000000000",
+      "feeDueMicro": "700000000",
+      "shareBps": 1000,
+      "spreadCoefBps": 200,
+      "nowTs": "1800000000",
+      "expected": {
+        "units": ["20", "20", "20", "20", "20"],
+        "grossValueMicro": "100000000",
+        "wrdDays": "292",
+        "feeChargedMicro": "100000000",
+        "feeCarriedMicro": "600000000",
+        "spreadMicro": "0",
+        "payoutMicro": "0",
+        "principalMicro": "100000000"
+      }
+    },
+    {
+      "case": "shareFlooredToWholeUnits",
+      "rungs": [
+        {
+          "units": "3",
+          "priceMicro": "1000000",
+          "maturityTs": "1807862400"
+        },
+        {
+          "units": "1",
+          "priceMicro": "1000000",
+          "maturityTs": "1815811200"
+        },
+        {
+          "units": "1",
+          "priceMicro": "1000000",
+          "maturityTs": "1823673600"
+        },
+        {
+          "units": "1",
+          "priceMicro": "1000000",
+          "maturityTs": "1831536000"
+        },
+        {
+          "units": "1",
+          "priceMicro": "1000000",
+          "maturityTs": "1847347200"
+        }
+      ],
+      "principalMicro": "5000000",
+      "feeDueMicro": "0",
+      "shareBps": 5000,
+      "spreadCoefBps": 200,
+      "nowTs": "1800000000",
+      "expected": {
+        "units": ["1", "0", "0", "0", "0"],
+        "grossValueMicro": "1000000",
+        "wrdDays": "91",
+        "feeChargedMicro": "0",
+        "feeCarriedMicro": "0",
+        "spreadMicro": "4982",
+        "payoutMicro": "995018",
+        "principalMicro": "2500000"
+      }
+    },
+    {
+      "case": "maturedLadderExitsWithoutSpread",
+      "rungs": [
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1799913600"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1799913600"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1799913600"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1799913600"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1799913600"
+        }
+      ],
+      "principalMicro": "1000000000",
+      "feeDueMicro": "0",
+      "shareBps": 10000,
+      "spreadCoefBps": 200,
+      "nowTs": "1800000000",
+      "expected": {
+        "units": ["200", "200", "200", "200", "200"],
+        "grossValueMicro": "1000000000",
+        "wrdDays": "0",
+        "feeChargedMicro": "0",
+        "feeCarriedMicro": "0",
+        "spreadMicro": "0",
+        "payoutMicro": "1000000000",
+        "principalMicro": "1000000000"
+      }
+    },
+    {
+      "case": "quarterWithOneRungMatured",
+      "rungs": [
+        {
+          "units": "40",
+          "priceMicro": "5000000",
+          "maturityTs": "1799740800"
+        },
+        {
+          "units": "40",
+          "priceMicro": "5000000",
+          "maturityTs": "1815811200"
+        },
+        {
+          "units": "40",
+          "priceMicro": "5000000",
+          "maturityTs": "1823673600"
+        },
+        {
+          "units": "40",
+          "priceMicro": "5000000",
+          "maturityTs": "1831536000"
+        },
+        {
+          "units": "40",
+          "priceMicro": "5000000",
+          "maturityTs": "1847347200"
+        }
+      ],
+      "principalMicro": "1000000000",
+      "feeDueMicro": "123456",
+      "shareBps": 2500,
+      "spreadCoefBps": 200,
+      "nowTs": "1800000000",
+      "expected": {
+        "units": ["10", "10", "10", "10", "10"],
+        "grossValueMicro": "250000000",
+        "wrdDays": "274",
+        "feeChargedMicro": "123456",
+        "feeCarriedMicro": "0",
+        "spreadMicro": "3749003",
+        "payoutMicro": "246127541",
+        "principalMicro": "250000000"
+      }
+    },
+    {
+      "case": "rungsADayShortFloorTheirDays",
+      "rungs": [
+        {
+          "units": "10",
+          "priceMicro": "100000000",
+          "maturityTs": "1807948799"
+        },
+        {
+          "units": "10",
+          "priceMicro": "100000000",
+          "maturityTs": "1815897599"
+        },
+        {
+          "units": "10",
+          "priceMicro": "100000000",
+          "maturityTs": "1823759999"
+        },
+        {
+          "units": "10",
+          "priceMicro": "100000000",
+          "maturityTs": "1831622399"
+        },
+        {
+          "units": "10",
+          "priceMicro": "100000000",
+          "maturityTs": "1847433599"
+        }
+      ],
+      "principalMicro": "5000000000",
+      "feeDueMicro": "41067",
+      "shareBps": 7300,
+      "spreadCoefBps": 200,
+      "nowTs": "1800000000",
+      "expected": {
+        "units": ["7", "7", "7", "7", "7"],
+        "grossValueMicro": "3500000000",
+        "wrdDays": "292",
+        "feeChargedMicro": "41067",
+        "feeCarriedMicro": "0",
+        "spreadMicro": "55961013",
+        "payoutMicro": "3443997920",
+        "principalMicro": "3650000000"
+      }
+    },
+    {
+      "case": "oneBasisPointOfALargeLadder",
+      "rungs": [
+        {
+          "units": "10000000",
+          "priceMicro": "1000000",
+          "maturityTs": "1807862400"
+        },
+        {
+          "units": "10000000",
+          "priceMicro": "1000000",
+          "maturityTs": "1815811200"
+        },
+        {
+          "units": "10000000",
+          "priceMicro": "1000000",
+          "maturityTs": "1823673600"
+        },
+        {
+          "units": "10000000",
+          "priceMicro": "1000000",
+          "maturityTs": "1831536000"
+        },
+        {
+          "units": "10000000",
+          "priceMicro": "1000000",
+          "maturityTs": "1847347200"
+        }
+      ],
+      "principalMicro": "50000000000000",
+      "feeDueMicro": "9",
+      "shareBps": 1,
+      "spreadCoefBps": 200,
+      "nowTs": "1800000000",
+      "expected": {
+        "units": ["1000", "1000", "1000", "1000", "1000"],
+        "grossValueMicro": "5000000000",
+        "wrdDays": "292",
+        "feeChargedMicro": "9",
+        "feeCarriedMicro": "0",
+        "spreadMicro": "79945242",
+        "payoutMicro": "4920054749",
+        "principalMicro": "5000000000"
+      }
+    }
+  ],
+  "settleRefused": [
+    {
+      "case": "shareOfNothing",
+      "rungs": [
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1807862400"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1815811200"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1823673600"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1831536000"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1847347200"
+        }
+      ],
+      "principalMicro": "1000000000",
+      "feeDueMicro": "0",
+      "shareBps": 0,
+      "spreadCoefBps": 200,
+      "nowTs": "1800000000",
+      "refusal": "InvalidExitShare"
+    },
+    {
+      "case": "shareAboveTheWhole",
+      "rungs": [
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1807862400"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1815811200"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1823673600"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1831536000"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1847347200"
+        }
+      ],
+      "principalMicro": "1000000000",
+      "feeDueMicro": "0",
+      "shareBps": 10001,
+      "spreadCoefBps": 200,
+      "nowTs": "1800000000",
+      "refusal": "InvalidExitShare"
+    },
+    {
+      "case": "shareMovingNoWholeUnit",
+      "rungs": [
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1807862400"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1815811200"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1823673600"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1831536000"
+        },
+        {
+          "units": "200",
+          "priceMicro": "1000000",
+          "maturityTs": "1847347200"
+        }
+      ],
+      "principalMicro": "1000000000",
+      "feeDueMicro": "0",
+      "shareBps": 49,
+      "spreadCoefBps": 200,
+      "nowTs": "1800000000",
+      "refusal": "ExitMovesNothing"
+    },
+    {
+      "case": "spreadAboveWhatTheFeeLeaves",
+      "rungs": [
+        {
+          "units": "1",
+          "priceMicro": "1000000",
+          "maturityTs": "1926230400"
+        },
+        {
+          "units": "1",
+          "priceMicro": "1000000",
+          "maturityTs": "1926230400"
+        },
+        {
+          "units": "1",
+          "priceMicro": "1000000",
+          "maturityTs": "1926230400"
+        },
+        {
+          "units": "1",
+          "priceMicro": "1000000",
+          "maturityTs": "1926230400"
+        },
+        {
+          "units": "1",
+          "priceMicro": "1000000",
+          "maturityTs": "1926230400"
+        }
+      ],
+      "principalMicro": "5000000",
+      "feeDueMicro": "0",
+      "shareBps": 10000,
+      "spreadCoefBps": 10000,
+      "nowTs": "1800000000",
+      "refusal": "SpreadExceedsValue"
+    }
   ]
 }

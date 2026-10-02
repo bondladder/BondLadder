@@ -28,6 +28,7 @@ export const SEED_ORACLE = seed('oracle')
 export const SEED_ISSUER = seed('issuer')
 export const SEED_INSTRUMENT = seed('instrument')
 export const SEED_RATING = seed('rating')
+export const SEED_BACKSTOP = seed('backstop')
 
 /// Інструмент, рейтинг, мінт і кастодія — по одному щаблю (open_ladder.rs).
 export const ACCOUNTS_PER_RUNG = 4
@@ -73,6 +74,42 @@ export function openLadderData(profile: RiskProfile, depositMicro: bigint): Uint
   data[OPEN_LADDER_DISCRIMINATOR.length] = PROFILE_VARIANT[profile]
 
   new DataView(data.buffer).setBigUint64(OPEN_LADDER_DISCRIMINATOR.length + 1, depositMicro, true)
+
+  return data
+}
+
+export const EXIT_LADDER_DISCRIMINATOR = Uint8Array.of(190, 153, 107, 64, 254, 108, 149, 215)
+
+/// Instrument, rating and the pool's holding of it, per rung (exit_ladder.rs).
+export const EXIT_ACCOUNTS_PER_RUNG = 3
+
+export const EXIT_LADDER_ACCOUNTS: readonly AccountSlot[] = [
+  { name: 'vault', signer: false, writable: true },
+  { name: 'position', signer: false, writable: true },
+  { name: 'owner', signer: true, writable: true },
+  { name: 'ownerUsdc', signer: false, writable: true },
+  { name: 'backstopUsdc', signer: false, writable: true },
+  { name: 'tokenProgram', signer: false, writable: false },
+  { name: 'systemProgram', signer: false, writable: false },
+]
+
+const U16_MAX = 65_535
+
+export function exitLadderData(shareBps: number, minPayoutMicro: bigint): Uint8Array {
+  if (!Number.isInteger(shareBps) || shareBps < 0 || shareBps > U16_MAX) {
+    throw new InstructionEncodeError(`share ${shareBps} does not fit u16`)
+  }
+  if (minPayoutMicro < 0n || minPayoutMicro > U64_MAX) {
+    throw new InstructionEncodeError(`payout floor ${minPayoutMicro} does not fit u64`)
+  }
+
+  const offset = EXIT_LADDER_DISCRIMINATOR.length
+  const data = new Uint8Array(offset + 2 + 8)
+  data.set(EXIT_LADDER_DISCRIMINATOR)
+
+  const view = new DataView(data.buffer)
+  view.setUint16(offset, shareBps, true)
+  view.setBigUint64(offset + 2, minPayoutMicro, true)
 
   return data
 }

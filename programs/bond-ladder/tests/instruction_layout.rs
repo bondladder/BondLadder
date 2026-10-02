@@ -7,10 +7,10 @@
 
 use anchor_lang::prelude::{AccountMeta, Pubkey};
 use anchor_lang::{Discriminator, InstructionData, ToAccountMetas};
-use bond_ladder::accounts::OpenLadder;
-use bond_ladder::instruction::OpenLadder as OpenLadderArgs;
+use bond_ladder::accounts::{ExitLadder, OpenLadder};
+use bond_ladder::instruction::{ExitLadder as ExitLadderArgs, OpenLadder as OpenLadderArgs};
 use bond_ladder::profiles::RiskProfile;
-use bond_ladder::state::{Position, Vault};
+use bond_ladder::state::{BackstopHolding, Position, Vault};
 use serde_json::Value;
 
 const SHARED_FIXTURE: &str = include_str!("../../../fixtures/instructions.json");
@@ -54,6 +54,81 @@ fn metas() -> Vec<AccountMeta> {
         system_program: marker("systemProgram"),
     }
     .to_account_metas(None)
+}
+
+fn exit_metas() -> Vec<AccountMeta> {
+    ExitLadder {
+        vault: marker("vault"),
+        position: marker("position"),
+        owner: marker("owner"),
+        owner_usdc: marker("ownerUsdc"),
+        backstop_usdc: marker("backstopUsdc"),
+        token_program: marker("tokenProgram"),
+        system_program: marker("systemProgram"),
+    }
+    .to_account_metas(None)
+}
+
+fn assert_slots(observed: &[AccountMeta], expected: &Value) {
+    let expected = expected.as_array().expect("accounts is an array");
+    assert_eq!(observed.len(), expected.len());
+
+    for (index, slot) in expected.iter().enumerate() {
+        let name = slot["name"].as_str().expect("name is a string");
+        let meta = &observed[index];
+
+        assert_eq!(meta.pubkey, marker(name), "slot {index} is not {name}");
+        assert_eq!(
+            meta.is_signer,
+            slot["signer"].as_bool().expect("signer is a bool"),
+            "signer on {name}"
+        );
+        assert_eq!(
+            meta.is_writable,
+            slot["writable"].as_bool().expect("writable is a bool"),
+            "writable on {name}"
+        );
+    }
+}
+
+#[test]
+fn exit_ladder_data_matches_the_shared_fixture() {
+    let fixture = fixture();
+    let exit_ladder = &fixture["exitLadder"];
+
+    assert_eq!(
+        hex(ExitLadderArgs::DISCRIMINATOR),
+        exit_ladder["discriminator"]
+            .as_str()
+            .expect("discriminator is a string")
+    );
+
+    let cases = exit_ladder["cases"].as_array().expect("cases is an array");
+    assert!(!cases.is_empty());
+
+    for entry in cases {
+        let args = ExitLadderArgs {
+            share_bps: u16::try_from(entry["shareBps"].as_u64().expect("shareBps is a number"))
+                .expect("shareBps fits u16"),
+            min_payout_micro: entry["minPayoutMicro"]
+                .as_str()
+                .expect("minPayoutMicro is a string")
+                .parse()
+                .expect("minPayoutMicro fits u64"),
+        };
+
+        assert_eq!(
+            hex(&args.data()),
+            entry["data"].as_str().expect("data is a string"),
+            "case {}",
+            entry["case"].as_str().expect("case is a string")
+        );
+    }
+}
+
+#[test]
+fn exit_ladder_accounts_match_the_shared_fixture() {
+    assert_slots(&exit_metas(), &fixture()["exitLadder"]["accounts"]);
 }
 
 #[test]
@@ -143,6 +218,10 @@ fn seeds_and_profile_bytes_match_the_shared_fixture() {
     assert_eq!(
         rating_oracle::state::RatingRecord::SEED,
         seeds["rating"].as_str().unwrap().as_bytes()
+    );
+    assert_eq!(
+        BackstopHolding::SEED,
+        seeds["backstop"].as_str().unwrap().as_bytes()
     );
 
     for entry in fixture["profileSeedBytes"]

@@ -9,7 +9,7 @@
  * No network, no wallet, no chain. Illustrative figures only.
  */
 
-import type { Bond, Issuer, Profile, ProfileKey, RedemptionQuote, RegisterEntry, Sheet, TermKey } from './source';
+import type { Bond, Issuer, Profile, ProfileKey, RegisterEntry, Sheet, TermKey } from './source';
 
 /* ------------------------------------------------------------------ */
 /* Rating scale                                                        */
@@ -416,83 +416,6 @@ export function tooFewIssuersRefusal(floorValue: number): string {
     const noun = count === 1 ? 'issuer meets' : 'issuers meet';
     return `Only ${word} ${noun} a floor of ${gradeLabel(floorValue)}. A position needs five, one per maturity, and is never opened partially. Nothing has been moved.`;
 }
-
-/* ------------------------------------------------------------------ */
-/* Screen 2 — the held position                                        */
-/* ------------------------------------------------------------------ */
-
-export const POSITION = {
-    valueLabel: '1,004.35 USDC',
-    valueNumber: 1004.35,
-    openedOn: '2026-09-01',
-    readOn: '2026-10-16',
-    daysHeld: 45,
-    profileName: 'Conservative',
-    floorValue: 7,
-    weightedRating: 'AA- (4.2)',
-    averageRemainingTerm: '0.68 years',
-    nextMaturity: '2026-12-03 · KESTREL-RAIL · 200.00 USDC',
-};
-
-/* ------------------------------------------------------------------ */
-/* Screen 3 — redemption                                               */
-/* ------------------------------------------------------------------ */
-
-/** The 100% row: every off-preset size on the slider is scaled from it. */
-export const REDEMPTION_FULL: RedemptionQuote = {
-    percent: 100,
-    positionValue: '1,004.35 USDC',
-    positionValueNumber: 1004.35,
-    spread: '13.66 USDC',
-    spreadNumber: 13.66,
-    receive: '990.69 USDC',
-    receiveNumber: 990.69,
-    remainderEach: '0.00 USDC',
-};
-
-export const REDEMPTION_PRESETS: RedemptionQuote[] = [
-    {
-        percent: 25,
-        positionValue: '251.09 USDC',
-        positionValueNumber: 251.09,
-        spread: '3.41 USDC',
-        spreadNumber: 3.41,
-        receive: '247.68 USDC',
-        receiveNumber: 247.68,
-        remainderEach: '150.00 USDC',
-    },
-    {
-        percent: 50,
-        positionValue: '502.18 USDC',
-        positionValueNumber: 502.18,
-        spread: '6.83 USDC',
-        spreadNumber: 6.83,
-        receive: '495.35 USDC',
-        receiveNumber: 495.35,
-        remainderEach: '100.00 USDC',
-    },
-    {
-        percent: 75,
-        positionValue: '753.26 USDC',
-        positionValueNumber: 753.26,
-        spread: '10.24 USDC',
-        spreadNumber: 10.24,
-        receive: '743.02 USDC',
-        receiveNumber: 743.02,
-        remainderEach: '50.00 USDC',
-    },
-    REDEMPTION_FULL,
-];
-
-export const REDEMPTION = {
-    spreadPercent: '1.36%',
-    averageRemainingTerm: '0.68 years',
-    spreadNote:
-        'You are asking the pool to hold your bonds to maturity. The spread pays for that wait, and shrinks as the bonds mature.',
-    poolDefault: 1200,
-    nextMaturityDate: '2026-12-03',
-    nextMaturityFrees: '202.01 USDC',
-};
 
 /* ------------------------------------------------------------------ */
 /* Screen 4 — register of events                                       */

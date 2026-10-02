@@ -89,11 +89,6 @@ export function termLabel(months: number): string {
     return `${months} months`;
 }
 
-/** Amount formatting: `1,004.35 USDC` — two decimals, thousands separator, always the unit. */
-export function usdc(value: number): string {
-    return `${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`;
-}
-
 /** Plain number with two decimals and a thousands separator, no unit. */
 export function amount(value: number): string {
     return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -124,4 +119,24 @@ export function signedUsdcFromMicro(micro: bigint): string {
     }
 
     return `${micro < 0n ? '−' : '+'} ${usdcFromMicro(micro < 0n ? -micro : micro)}`;
+}
+
+const LAMPORTS_PER_SOL = 1_000_000_000n;
+const LAMPORT_DIGITS = 9;
+
+/** `0.0012876 SOL` — unrounded, because a rent rounded to `0.00 SOL` would read as free. */
+export function solFromLamports(lamports: bigint): string {
+    const fraction = (lamports % LAMPORTS_PER_SOL).toString().padStart(LAMPORT_DIGITS, '0').replace(/0+$/, '');
+
+    return `${lamports / LAMPORTS_PER_SOL}${fraction === '' ? '' : `.${fraction}`} SOL`;
+}
+
+const PPM_PER_PERCENT = 10_000n;
+
+/** `+ 0.0100%`, `− 0.1000%` — a reconciliation figure, so the sign is printed. */
+export function signedPercentFromPpm(ppm: bigint): string {
+    const absolute = ppm < 0n ? -ppm : ppm;
+    const figure = `${absolute / PPM_PER_PERCENT}.${(absolute % PPM_PER_PERCENT).toString().padStart(4, '0')}%`;
+
+    return ppm === 0n ? figure : `${ppm < 0n ? '−' : '+'} ${figure}`;
 }

@@ -1,7 +1,7 @@
 /**
  * BondLadder — the boundary the screens read through.
  *
- * `LadderSource` is what the four screens need; `mockSource` is the one
+ * `LadderSource` is what the screens still on mocks need; `mockSource` is the one
  * implementation of it that exists today. Switching the app to the chain is
  * meant to be the re-export below pointing at an RPC module instead, and
  * nothing else — so no screen may import `mockSource` directly.
@@ -67,18 +67,6 @@ export interface Sheet {
     issuerNote: string;
 }
 
-export interface RedemptionQuote {
-    percent: number;
-    positionValue: string;
-    positionValueNumber: number;
-    spread: string;
-    spreadNumber: number;
-    receive: string;
-    receiveNumber: number;
-    /** Remaining amount held against each of the five maturities. */
-    remainderEach: string;
-}
-
 export interface RegisterEntry {
     date: string;
     event: string;
@@ -99,28 +87,6 @@ export interface DepositLimits {
 export interface Refusals {
     belowMinimum: string;
     aboveMaximum: string;
-}
-
-export interface PositionSummary {
-    valueLabel: string;
-    valueNumber: number;
-    openedOn: string;
-    readOn: string;
-    daysHeld: number;
-    profileName: string;
-    floorValue: number;
-    weightedRating: string;
-    averageRemainingTerm: string;
-    nextMaturity: string;
-}
-
-export interface RedemptionTerms {
-    spreadPercent: string;
-    averageRemainingTerm: string;
-    spreadNote: string;
-    poolDefault: number;
-    nextMaturityDate: string;
-    nextMaturityFrees: string;
 }
 
 /** A holding drawn on the miniature map beside the rating-breach entry. */
@@ -155,14 +121,6 @@ export interface LadderSource {
     sheetForFloor(floorValue: number, profile: ProfileKey): Sheet | null;
     tooFewIssuersRefusal(floorValue: number): string;
 
-    /** Still read by the redemption screen, which has not moved yet. */
-    POSITION: PositionSummary;
-
-    /* Redemption */
-    REDEMPTION: RedemptionTerms;
-    REDEMPTION_FULL: RedemptionQuote;
-    REDEMPTION_PRESETS: RedemptionQuote[];
-
     /* Register of events */
     REGISTER: RegisterEntry[];
     REGISTER_PREAMBLE: string;
@@ -182,8 +140,8 @@ export interface LadderSource {
 /**
  * Two of them, for as long as the move to the chain is half done. `chain`
  * reads the deployed vault, the catalogue, the ratings and the held position,
- * and is what the composer (T027) and the statement (T028) use; `mockSource`
- * still backs the two screens that have not been moved yet. A screen may
+ * and is what the composer, the statement and the exit use; `mockSource`
+ * still backs the register of events, which has not been moved yet. A screen may
  * import neither directly — the boundary is this file, and when the last
  * screen moves the mock simply stops being re-exported.
  */

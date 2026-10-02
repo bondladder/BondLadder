@@ -17,9 +17,13 @@
 
 import {
     accrueFee,
+    BPS_DENOMINATOR,
     decodeInstrument,
     decodeOracleConfig,
     decodeRatingRecord,
+    type ExitRefusal,
+    ExitRefusedError,
+    type ExitSettlement,
     encodeBase58,
     fillForShare,
     INSTRUMENT_ACCOUNT,
@@ -34,14 +38,19 @@ import {
     RATING_RECORD_ACCOUNT,
     type RatingRecord,
     type RiskProfile,
+    settleExit,
     type Vault,
 } from '@bondladder/shared';
 import { PublicKey } from '@solana/web3.js';
 import { usdcFromMicro } from './format';
 import {
     associatedTokenAddress,
+    awaitSignature,
+    BACKSTOP_HOLDING_SPACE,
+    backstopHoldingAddress,
     buildCustodySetup,
     buildDeposit,
+    buildExit,
     connection,
     instrumentAddress,
     missingCustody,
@@ -51,6 +60,7 @@ import {
     readPosition,
     readTokenAccount,
     readVault,
+    simulate,
     type VaultState,
 } from './program';
 
@@ -630,6 +640,15 @@ const STATEMENT_PROFILES: readonly RiskProfile[] = ['conservative', 'balanced'];
  * catalogue-wide scan.
  */
 export async function readStatements(owner: string, nowTs: bigint): Promise<readonly PositionStatement[]> {
+    return (await readHeld(owner, nowTs)).statements;
+}
+
+interface Held {
+    readonly vault: VaultState;
+    readonly statements: readonly PositionStatement[];
+}
+
+async function readHeld(owner: string, nowTs: bigint): Promise<Held> {
     const ownerKey = new PublicKey(owner);
     const [vault, held] = await Promise.all([
         readVault(),
@@ -638,7 +657,7 @@ export async function readStatements(owner: string, nowTs: bigint): Promise<read
 
     const positions = held.filter((position): position is Position => position !== null);
     if (positions.length === 0) {
-        return [];
+        return { vault, statements: [] };
     }
 
     const issuerProgram = new PublicKey(vault.state.issuerProgram);
@@ -669,7 +688,282 @@ export async function readStatements(owner: string, nowTs: bigint): Promise<read
 
     const { maxAgeSecs } = decodeOracleConfig(oracle.data);
 
-    return positions.map((position) =>
-        positionStatement({ position, vault: vault.state, instruments, ratings, nowTs, maxAgeSecs }),
+    return {
+        vault,
+        statements: positions.map((position) =>
+            positionStatement({ position, vault: vault.state, instruments, ratings, nowTs, maxAgeSecs }),
+        ),
+    };
+}
+
+/* ------------------------------------------------------------------ */
+/* The exit                                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The tolerance FR-014 has the client declare, set to the SC-006 budget so the
+ * floor signed with the exit and the promise measured against it are one
+ * number. Between quote and settlement the fee grows by about 1e-8 a minute
+ * and the day count can only fall, so in practice only a price change by the
+ * issuer can reach it.
+ */
+export const QUOTE_TOLERANCE_BPS = 10;
+
+export function payoutFloor(payoutMicro: bigint): bigint {
+    return (payoutMicro * (BPS_DENOMINATOR - BigInt(QUOTE_TOLERANCE_BPS))) / BPS_DENOMINATOR;
+}
+
+export interface ExitQuoteView {
+    readonly shareBps: number;
+    readonly settlement: ExitSettlement;
+    /** What the share is worth once the fee is settled — the base FR-030 asks the quote to start from. */
+    readonly netValueMicro: bigint;
+    readonly floorMicro: bigint;
+}
+
+export type ExitOutcome =
+    | { readonly ok: true; readonly quote: ExitQuoteView }
+    | { readonly ok: false; readonly refusal: string; readonly coveredPercent: number | null };
+
+const BPS_PER_PERCENT = 100;
+const WHOLE_PERCENT = 100;
+
+const SETTLE_REFUSALS: Record<ExitRefusal, string> = {
+    InvalidExitShare: 'An exit takes between one and a hundred percent of the position. Nothing has been moved.',
+    ExitMovesNothing:
+        'This share is less than one whole unit on every rung, so it would move nothing. Choose a larger share. ' +
+        'Nothing has been moved.',
+    SpreadExceedsValue:
+        'The duration spread would exceed what this share is worth, so no exit can be quoted. Nothing has been moved.',
+};
+
+function settleShare(statement: PositionStatement, vault: Vault, percent: number, nowTs: bigint): ExitSettlement {
+    return settleExit({
+        rungs: statement.rows.map((row) => ({
+            units: row.units,
+            priceMicro: row.priceMicro,
+            maturityTs: row.maturityTs,
+        })),
+        principalMicro: statement.principalMicro,
+        feeDueMicro: statement.feeAccruedMicro,
+        shareBps: Number.isInteger(percent) ? percent * BPS_PER_PERCENT : 0,
+        spreadCoefBps: vault.spreadCoefBps,
+        nowTs,
+    });
+}
+
+/**
+ * The largest whole percent the pool can pay today, so a refusal can offer a
+ * smaller exit instead of making one: FR-015 lets a partial exit happen only
+ * when the owner chooses it.
+ */
+export function largestCoveredPercent(statement: PositionStatement, vault: Vault, nowTs: bigint): number | null {
+    for (let percent = WHOLE_PERCENT; percent >= 1; percent -= 1) {
+        try {
+            if (settleShare(statement, vault, percent, nowTs).payoutMicro <= vault.backstopFreeUsdc) {
+                return percent;
+            }
+        } catch (failure) {
+            if (!(failure instanceof ExitRefusedError)) {
+                throw failure;
+            }
+        }
+    }
+
+    return null;
+}
+
+/**
+ * The quote shown before the signature (FR-028), or the reason there is none.
+ * The pool is checked here against the same counter `take_exit` debits, so a
+ * shortfall is a sentence on the screen rather than a failed transaction.
+ */
+export function quoteExit(statement: PositionStatement, vault: Vault, percent: number, nowTs: bigint): ExitOutcome {
+    let settlement: ExitSettlement;
+    try {
+        settlement = settleShare(statement, vault, percent, nowTs);
+    } catch (failure) {
+        if (failure instanceof ExitRefusedError) {
+            return { ok: false, refusal: SETTLE_REFUSALS[failure.reason], coveredPercent: null };
+        }
+        throw failure;
+    }
+
+    if (settlement.payoutMicro > vault.backstopFreeUsdc) {
+        return {
+            ok: false,
+            refusal:
+                `The backstop pool holds ${usdcFromMicro(vault.backstopFreeUsdc)} free, less than the ` +
+                `${usdcFromMicro(settlement.payoutMicro)} this exit pays. An instant exit is refused whole rather ` +
+                'than paid in part. Nothing has been moved.',
+            coveredPercent: largestCoveredPercent(statement, vault, nowTs),
+        };
+    }
+
+    return {
+        ok: true,
+        quote: {
+            shareBps: percent * BPS_PER_PERCENT,
+            settlement,
+            netValueMicro: settlement.grossValueMicro - settlement.feeChargedMicro,
+            floorMicro: payoutFloor(settlement.payoutMicro),
+        },
+    };
+}
+
+/** The first exit through an instrument creates the pool's record of it, at the owner's expense. */
+export function holdingsToCreate(
+    statement: PositionStatement,
+    units: readonly bigint[],
+    heldByPool: ReadonlySet<string>,
+): number {
+    return statement.rows.filter((row, index) => (units[index] ?? 0n) > 0n && !heldByPool.has(row.mint)).length;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
+}
+
+/** `{ InstructionError: [index, { Custom: code }] }` is the only shape that carries the program's own code. */
+export function customErrorCode(err: unknown): number | null {
+    if (!isRecord(err) || !Array.isArray(err.InstructionError)) {
+        return null;
+    }
+
+    const detail: unknown = err.InstructionError[1];
+    return isRecord(detail) && typeof detail.Custom === 'number' ? detail.Custom : null;
+}
+
+const BACKSTOP_INSUFFICIENT = 6021;
+const INVALID_EXIT_SHARE = 6024;
+const EXIT_MOVES_NOTHING = 6025;
+const SPREAD_EXCEEDS_VALUE = 6026;
+const QUOTE_DRIFT = 6028;
+
+export function exitRefusalText(code: number): string {
+    switch (code) {
+        case BACKSTOP_INSUFFICIENT:
+            return (
+                'The backstop pool cannot pay this exit right now, and an instant exit is refused whole rather than ' +
+                'paid in part. Nothing has been moved.'
+            );
+        case QUOTE_DRIFT:
+            return (
+                'The exit would pay less than the quote by more than the declared ' +
+                `${QUOTE_TOLERANCE_BPS / BPS_PER_PERCENT}% tolerance, which means the issuer's price moved. ` +
+                'Nothing has been moved; read the quote again.'
+            );
+        case INVALID_EXIT_SHARE:
+            return SETTLE_REFUSALS.InvalidExitShare;
+        case EXIT_MOVES_NOTHING:
+            return SETTLE_REFUSALS.ExitMovesNothing;
+        case SPREAD_EXCEEDS_VALUE:
+            return SETTLE_REFUSALS.SpreadExceedsValue;
+        default:
+            return `The program refused the exit (error ${code}). Nothing has been moved.`;
+    }
+}
+
+const PPM = 1_000_000n;
+
+/** Signed, so an exit that paid more than quoted is not mistaken for one that paid less. */
+export function driftPpm(quotedMicro: bigint, receivedMicro: bigint): bigint {
+    return quotedMicro === 0n ? 0n : ((receivedMicro - quotedMicro) * PPM) / quotedMicro;
+}
+
+export interface ExitDesk {
+    readonly vault: VaultState;
+    readonly statements: readonly PositionStatement[];
+    /** Mints the pool already keeps a record of; an exit through any other pays that record's rent. */
+    readonly heldByPool: ReadonlySet<string>;
+    readonly holdingRentLamports: bigint;
+}
+
+export async function loadExitDesk(owner: string, nowTs: bigint): Promise<ExitDesk> {
+    const { vault, statements } = await readHeld(owner, nowTs);
+    const mints = [...new Set(statements.flatMap((statement) => statement.rows.map((row) => row.mint)))];
+
+    const [holdings, rent] = await Promise.all([
+        mints.length === 0
+            ? Promise.resolve([])
+            : connection().getMultipleAccountsInfo(mints.map((mint) => backstopHoldingAddress(new PublicKey(mint)))),
+        connection().getMinimumBalanceForRentExemption(BACKSTOP_HOLDING_SPACE),
+    ]);
+
+    return {
+        vault,
+        statements,
+        heldByPool: new Set(mints.filter((_, index) => holdings[index] != null)),
+        holdingRentLamports: BigInt(rent),
+    };
+}
+
+/** What the screen is waiting for. */
+export type ExitStep = 'checking' | 'signing' | 'confirming';
+
+export interface ExitReceipt {
+    readonly signature: string;
+    readonly quotedMicro: bigint;
+    /** Read off the owner's USDC account, not off the quote — the figure FR-014 is about. */
+    readonly receivedMicro: bigint;
+}
+
+function refuseOn(err: unknown): void {
+    if (err === null || err === undefined) {
+        return;
+    }
+
+    const code = customErrorCode(err);
+    throw new ProgramClientError(
+        code === null
+            ? `The network refused the exit: ${JSON.stringify(err)}. Nothing has been moved.`
+            : exitRefusalText(code),
     );
+}
+
+export async function exitPosition(
+    desk: ExitDesk,
+    statement: PositionStatement,
+    quote: ExitQuoteView,
+    owner: string,
+    sign: (transaction: Uint8Array) => Promise<string>,
+    onStep: (step: ExitStep) => void,
+): Promise<ExitReceipt> {
+    const ownerKey = new PublicKey(owner);
+    const usdcMint = new PublicKey(desk.vault.state.usdcMint);
+    const issuerProgram = new PublicKey(desk.vault.state.issuerProgram);
+    const ratingOracle = new PublicKey(desk.vault.state.ratingOracle);
+
+    onStep('checking');
+    const transaction = await buildExit({
+        vault: desk.vault,
+        owner: ownerKey,
+        profile: statement.profile,
+        shareBps: quote.shareBps,
+        minPayoutMicro: quote.floorMicro,
+        rungs: statement.rows.map((row) => {
+            const mint = new PublicKey(row.mint);
+
+            return {
+                instrument: instrumentAddress(mint, issuerProgram),
+                rating: ratingAddress(mint, ratingOracle),
+                holding: backstopHoldingAddress(mint),
+            };
+        }),
+    });
+    const [before, simulated] = await Promise.all([readTokenAccount(usdcMint, ownerKey), simulate(transaction)]);
+    refuseOn(simulated);
+
+    onStep('signing');
+    const signature = await sign(transaction);
+
+    onStep('confirming');
+    refuseOn(await awaitSignature(signature));
+    const after = await readTokenAccount(usdcMint, ownerKey);
+
+    return {
+        signature,
+        quotedMicro: quote.settlement.payoutMicro,
+        receivedMicro: tokenAmountFrom(after) - tokenAmountFrom(before),
+    };
 }

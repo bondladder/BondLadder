@@ -10,14 +10,23 @@ import {
     ratingRecordSchema,
     rungTargetTs,
     SCALE_VERSION,
+    settleExit,
     vaultSchema,
 } from '@bondladder/shared';
 import { describe, expect, it } from 'vitest';
 import {
     catalogueCandidates,
     chartDomain,
+    customErrorCode,
+    driftPpm,
+    exitRefusalText,
+    holdingsToCreate,
     joinCatalogue,
+    largestCoveredPercent,
+    payoutFloor,
     positionStatement,
+    QUOTE_TOLERANCE_BPS,
+    quoteExit,
     ratingAxis,
     type StatementInput,
     termSheet,
@@ -562,5 +571,172 @@ describe('positionStatement', () => {
         const short = RUNG_MONTHS.slice(1).map((_, index) => heldInstrument(index + 1));
 
         expect(() => positionStatement(statementInput({ instruments: short }))).toThrow(ProgramClientError);
+    });
+});
+
+/* ------------------------------------------------------------------ */
+/* The exit                                                            */
+/* ------------------------------------------------------------------ */
+
+const FLUSH_POOL = 1_000_000_000_000n;
+
+function heldStatement(overrides: Partial<Record<string, unknown>> = {}) {
+    return positionStatement(statementInput({ position: heldPosition(overrides) }));
+}
+
+describe('payoutFloor', () => {
+    it("signs for the quote less the declared tolerance, rounded in the owner's favour", () => {
+        expect(QUOTE_TOLERANCE_BPS).toBe(10);
+        expect(payoutFloor(1_000_000n)).toBe(999_000n);
+        expect(payoutFloor(983_026_941n)).toBe(982_043_914n);
+        expect(payoutFloor(999n)).toBe(998n);
+    });
+
+    it('asks for nothing when the quote is nothing', () => {
+        expect(payoutFloor(0n)).toBe(0n);
+    });
+});
+
+describe('quoteExit', () => {
+    it('quotes the share through the settlement the program mirrors', () => {
+        const statement = heldStatement({ feeAccrued: 1_234_567n, lastFeeTs: NOW - 30n * DAY });
+        const outcome = quoteExit(statement, vault({ backstopFreeUsdc: FLUSH_POOL }), 100, NOW);
+
+        if (!outcome.ok) throw new Error(outcome.refusal);
+        const expected = settleExit({
+            rungs: statement.rows.map((row) => ({
+                units: row.units,
+                priceMicro: row.priceMicro,
+                maturityTs: row.maturityTs,
+            })),
+            principalMicro: statement.principalMicro,
+            feeDueMicro: statement.feeAccruedMicro,
+            shareBps: 10_000,
+            spreadCoefBps: 200,
+            nowTs: NOW,
+        });
+
+        expect(outcome.quote.settlement).toEqual(expected);
+        expect(outcome.quote.shareBps).toBe(10_000);
+        expect(outcome.quote.netValueMicro).toBe(expected.grossValueMicro - expected.feeChargedMicro);
+        expect(outcome.quote.floorMicro).toBe(payoutFloor(expected.payoutMicro));
+    });
+
+    it('charges the whole fee due to a partial exit', () => {
+        const statement = heldStatement({ feeAccrued: 2_000_000n });
+        const outcome = quoteExit(statement, vault({ backstopFreeUsdc: FLUSH_POOL }), 50, NOW);
+
+        if (!outcome.ok) throw new Error(outcome.refusal);
+        expect(outcome.quote.shareBps).toBe(5_000);
+        expect(outcome.quote.settlement.units).toEqual([100n, 100n, 100n, 100n, 100n]);
+        expect(outcome.quote.settlement.feeChargedMicro).toBe(statement.feeAccruedMicro);
+    });
+
+    it('refuses an exit the pool cannot pay whole, and names the largest share it can', () => {
+        const statement = heldStatement();
+        const full = quoteExit(statement, vault({ backstopFreeUsdc: FLUSH_POOL }), 100, NOW);
+        if (!full.ok) throw new Error(full.refusal);
+        const pool = full.quote.settlement.payoutMicro / 2n;
+
+        const outcome = quoteExit(statement, vault({ backstopFreeUsdc: pool }), 100, NOW);
+
+        expect(outcome.ok).toBe(false);
+        if (outcome.ok) return;
+        expect(outcome.refusal).toContain('Nothing has been moved');
+        expect(outcome.refusal).toContain('refused whole');
+        expect(outcome.coveredPercent).not.toBeNull();
+
+        const covered = outcome.coveredPercent ?? 0;
+        const fits = quoteExit(statement, vault({ backstopFreeUsdc: pool }), covered, NOW);
+        const above = quoteExit(statement, vault({ backstopFreeUsdc: FLUSH_POOL }), covered + 1, NOW);
+        expect(fits.ok).toBe(true);
+        if (!above.ok) throw new Error(above.refusal);
+        expect(above.quote.settlement.payoutMicro).toBeGreaterThan(pool);
+    });
+
+    it('offers no smaller share when the pool is empty', () => {
+        const outcome = quoteExit(heldStatement(), vault({ backstopFreeUsdc: 0n }), 100, NOW);
+
+        expect(outcome.ok).toBe(false);
+        if (outcome.ok) return;
+        expect(outcome.coveredPercent).toBeNull();
+    });
+
+    it('refuses a share that moves no whole unit, without blaming the pool', () => {
+        const thin = heldPosition({ rungs: RUNG_MONTHS.map((_, index) => heldRung(index, { amount: 1n })) });
+        const statement = positionStatement(statementInput({ position: thin }));
+
+        const outcome = quoteExit(statement, vault({ backstopFreeUsdc: FLUSH_POOL }), 50, NOW);
+
+        expect(outcome.ok).toBe(false);
+        if (outcome.ok) return;
+        expect(outcome.refusal).toContain('whole unit');
+        expect(outcome.coveredPercent).toBeNull();
+    });
+
+    it('refuses a share outside one to a hundred percent', () => {
+        for (const percent of [0, 101, 2.5]) {
+            const outcome = quoteExit(heldStatement(), vault({ backstopFreeUsdc: FLUSH_POOL }), percent, NOW);
+
+            expect(outcome.ok, `${percent}`).toBe(false);
+        }
+    });
+});
+
+describe('largestCoveredPercent', () => {
+    it('is the whole position when the pool covers it', () => {
+        expect(largestCoveredPercent(heldStatement(), vault({ backstopFreeUsdc: FLUSH_POOL }), NOW)).toBe(100);
+    });
+
+    it('is nothing when not even one percent fits', () => {
+        expect(largestCoveredPercent(heldStatement(), vault({ backstopFreeUsdc: 1n }), NOW)).toBeNull();
+    });
+});
+
+describe('holdingsToCreate', () => {
+    it('counts the rungs this exit moves units on and the pool holds nothing of yet', () => {
+        const statement = heldStatement();
+        const present = new Set([mintAt(0), mintAt(3)]);
+
+        expect(holdingsToCreate(statement, [1n, 1n, 1n, 1n, 1n], present)).toBe(3);
+        expect(holdingsToCreate(statement, [1n, 0n, 0n, 1n, 0n], present)).toBe(0);
+        expect(holdingsToCreate(statement, [0n, 0n, 1n, 0n, 0n], new Set())).toBe(1);
+    });
+});
+
+describe('customErrorCode', () => {
+    it("reads the program's own code out of an instruction error", () => {
+        expect(customErrorCode({ InstructionError: [0, { Custom: 6021 }] })).toBe(6021);
+    });
+
+    it('is nothing for an error that carries no custom code', () => {
+        expect(customErrorCode({ InstructionError: [0, 'InvalidAccountData'] })).toBeNull();
+        expect(customErrorCode('AccountNotFound')).toBeNull();
+        expect(customErrorCode(null)).toBeNull();
+        expect(customErrorCode({ InstructionError: [0, { Custom: 'x' }] })).toBeNull();
+    });
+});
+
+describe('exitRefusalText', () => {
+    it('explains the two refusals the owner can meet', () => {
+        expect(exitRefusalText(6021)).toContain('backstop pool');
+        expect(exitRefusalText(6028)).toContain('0.1%');
+    });
+
+    it('names the code of a refusal it has no sentence for', () => {
+        expect(exitRefusalText(6003)).toContain('6003');
+        expect(exitRefusalText(6003)).toContain('Nothing has been moved');
+    });
+});
+
+describe('driftPpm', () => {
+    it('measures what arrived against what was quoted, in parts per million', () => {
+        expect(driftPpm(1_000_000n, 1_000_100n)).toBe(100n);
+        expect(driftPpm(1_000_000n, 999_000n)).toBe(-1_000n);
+        expect(driftPpm(1_000_000n, 1_000_000n)).toBe(0n);
+    });
+
+    it('is nothing against a quote of nothing', () => {
+        expect(driftPpm(0n, 0n)).toBe(0n);
     });
 });
