@@ -11,10 +11,19 @@ off the position's remaining duration.
 
 Early development, devnet only. Not audited. Not for production funds.
 
-What runs today: the three programs are deployed on devnet, and a 1000 USDC deposit
-opens a five-rung ladder in a single transaction that reconciles with the allocation
-shown before signing. The web app is a clickable prototype on mock data with a chain
-client underneath; exit, maintenance and the backstop pool are not implemented yet.
+What runs today, on devnet and in the web app: a deposit opens a five-rung ladder in a
+single transaction that reconciles with the allocation shown before signing; the position
+screen reads the ladder back with the fee accrued so far; and an exit, full or partial, is
+quoted before signing and paid from the backstop pool in the same transaction, or refused
+whole when the pool cannot pay.
+
+Measured against the public devnet endpoint, worst run rather than average: the ladder on
+screen in 0.85 s, a deposit confirmed in 0.58 s, the first position screen in 0.94 s, and
+USDC in the wallet 4.07 s after signing an exit. Over 100 exits of different sizes the
+largest gap between quote and payout was 8 micro-USDC.
+
+Not there yet: matured rungs are not rolled, nothing reacts to a rating downgrade, the
+maintenance keeper is not running, and the history screen still shows illustrative data.
 
 What is mocked and will stay mocked in the demo: the instrument issuer and the credit
 ratings. Both are our own programs seeded with fictional issuers.
@@ -60,23 +69,28 @@ Ratings expire after 30 days; re-running `deploy:devnet` is what refreshes them.
 
 ## Hosting
 
-The web app deploys to GitHub Pages from `main` through `.github/workflows/pages.yml`:
-gate, build under `/<repository>/`, publish. Once in the repository settings, set
-**Pages → Source → GitHub Actions**. The workflow falls back to the public devnet RPC and
-the program ids above; a repository secret `VITE_SOLANA_RPC_URL` overrides the RPC (a key
-restricted to the Pages origin, since every `VITE_*` value ends up in the bundle).
+GitHub Pages from `main` through `.github/workflows/pages.yml`: the landing page
+(`apps/landing`, static, no build) at `/<repository>/` and the web app, built under
+`/<repository>/app/`, beside it. The root `404.html` is the app's shell, so a deep link
+into the app loads it, and a link from before the app moved under `app/` is sent to the
+same route there. Once in the repository settings, set **Pages → Source → GitHub
+Actions**. The workflow falls back to the public devnet RPC and the program ids above; a
+repository secret `VITE_SOLANA_RPC_URL` overrides the RPC (a key restricted to the Pages
+origin, since every `VITE_*` value ends up in the bundle).
 
 ## Layout
 
 ```
-programs/bond-ladder     vault, ladders, position accounts; backstop and fees to come
+programs/bond-ladder     vault, ladders, positions, the management fee, the backstop pool and exits
 programs/rating-oracle   normalized credit ratings on a 22-notch scale, readable by any program
 programs/mock-issuer     demo-only instrument issuer (redeems at maturity only)
 packages/shared          TS mirrors of the program logic: rating scale, profiles, ladder
                          selection, fee math, account decoders, instruction encoders
-apps/web                 deposit and position screens; chain client in src/lib
+apps/landing             the landing page: static HTML and CSS, no build
+apps/web                 deposit, position and exit screens; chain client in src/lib
 apps/keeper              permissionless maintenance crank (placeholder)
-scripts                  devnet deployment, demo catalogue, demo deposit
+scripts                  devnet deployment, demo catalogue, demo deposit, backstop top-up,
+                         latency and quote measurements
 fixtures                 JSON read by both Rust and TS tests
 ```
 

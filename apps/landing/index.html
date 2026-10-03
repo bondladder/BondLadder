@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BondLadder — a bond ladder for USDC on Solana</title>
+<meta name="description" content="Deposit USDC across five rated debt instruments maturing in 3 to 18 months, and leave on any day at a price quoted before you sign. A Solana devnet demo.">
+<link rel="canonical" href="https://bondladder.github.io/BondLadder/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="BondLadder — five maturities, one deposit, leave on any day">
+<meta property="og:description" content="A bond ladder for USDC on Solana devnet: the whole ladder shown before you sign, and the price to leave before you leave.">
+<meta property="og:url" content="https://bondladder.github.io/BondLadder/">
+<meta property="og:image" content="https://bondladder.github.io/BondLadder/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="BondLadder — five maturities, one deposit, leave on any day">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#ff66c4">
+<link rel="icon" href="assets/favicon.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,500..700;1,6..96,500..600&amp;display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="cover">
+  <div class="wrap">
+    <div class="masthead">
+      <a class="nameplate d" href="./">BondLadder</a>
+      <div class="masthead-right">
+        <span>Devnet demo · Not audited</span>
+        <a href="app/">Open the app →</a>
+      </div>
+    </div>
+    <div class="cover-grid">
+      <div>
+        <p class="kicker">A bond ladder for USDC on Solana</p>
+        <h1 class="d">Five maturities. One deposit. <em>Leave on any day.</em></h1>
+        <p class="standfirst">Deposit USDC and the vault splits it across five rated debt instruments that mature in 3, 6, 9, 12 and 18 months. You see the whole ladder before you sign, and the price to leave before you leave.</p>
+        <a class="button" href="app/">Open the app</a>
+        <p class="status">Runs on Solana devnet with demo USDC, a demo catalogue of fictional issuers and our own ratings. Not audited.</p>
+      </div>
+      <div class="cover-art">
+        <img src="assets/logo.png" width="960" height="960" alt="The BondLadder mark: two lime sneakers in front of six black arcs on pink">
+      </div>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+  <section class="wrap section section-first" aria-labelledby="ladder">
+    <div class="spread">
+      <div class="folio d" aria-hidden="true">01</div>
+      <div class="main-col">
+        <h2 class="d" id="ladder">The strategy treasurers use, without the brokerage account</h2>
+        <p>A bond ladder splits money across bonds that mature at different times, so part of it comes due regularly instead of all at once. In traditional finance it takes a brokerage account, minimum lots and manual reinvestment. Here it takes a wallet.</p>
+      </div>
+      <figure class="side-col ladder">
+        <ol class="rungs" aria-hidden="true">
+          <li></li><li></li><li></li><li></li><li></li>
+        </ol>
+        <dl class="rung-labels">
+          <div><dt>3 mo</dt><dd>20%</dd></div>
+          <div><dt>6 mo</dt><dd>20%</dd></div>
+          <div><dt>9 mo</dt><dd>20%</dd></div>
+          <div><dt>12 mo</dt><dd>20%</dd></div>
+          <div><dt>18 mo</dt><dd>20%</dd></div>
+        </dl>
+        <figcaption>Equal shares on five rungs. Whatever does not divide evenly goes to the 18-month rung.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="wrap section" aria-labelledby="how">
+    <div class="spread">
+      <div class="folio d" aria-hidden="true">02</div>
+      <div class="wide-col">
+        <h2 class="d" id="how">How it works</h2>
+        <ol class="steps">
+          <li>
+            <h3 class="d">1 — Pick a profile.</h3>
+            <p>Conservative takes nothing rated below A-, Balanced nothing below BBB-, and each caps how much one issuer can hold. Nothing below BBB- is ever bought.</p>
+          </li>
+          <li>
+            <h3 class="d">2 — See the ladder before you sign.</h3>
+            <p>Each rung's instrument, rating, maturity and amount is on screen first. Whatever cannot buy a whole unit stays in your wallet.</p>
+          </li>
+          <li>
+            <h3 class="d">3 — Deposit once.</h3>
+            <p>The whole ladder opens in one transaction.</p>
+          </li>
+          <li>
+            <h3 class="d">4 — Leave on any day.</h3>
+            <p>Exit all of it or part of it before maturity. USDC comes back in the same transaction, from a backstop pool the protocol funds — not from other depositors.</p>
+          </li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap section" aria-labelledby="exit">
+    <div class="spread">
+      <div class="folio d" aria-hidden="true">03</div>
+      <div class="main-col">
+        <h2 class="d" id="exit">The less time left, the less it costs to leave</h2>
+        <p>The exit pays the position's current value, minus a 0.5% yearly management fee owed so far, minus a spread that grows with how long the pool will have to hold your instruments. A ladder close to maturity leaves almost for free.</p>
+        <p>You see all four figures before you sign, and the transaction carries a floor: it cannot pay you less than the quote by more than 0.1%. If the pool is short, the exit is refused whole and you are offered the largest share it can pay.</p>
+      </div>
+      <figure class="side-col receipt">
+        <blockquote>
+          <p class="d">“Quoted 490.567373 USDC. Received 490.567372.”</p>
+        </blockquote>
+        <figcaption>One exit of 50%, from the app, on devnet, 2026-10-02. <a href="https://explorer.solana.com/tx/kpti9qj3jwHDVZHggdzeoRfZhzoPLzpWCzeKQ6fYkx7LG8RUBvi4KMrSe9PPeLcMefXHVQWc2YZhvLoZTrdoSTG?cluster=devnet">View the transaction ↗</a></figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="numbers" aria-labelledby="numbers">
+    <div class="wrap">
+      <div class="spread">
+        <div class="folio d" aria-hidden="true">04</div>
+        <div class="wide-col">
+          <h2 class="d" id="numbers">By the numbers</h2>
+          <p class="note">Measured against the public devnet endpoint. Each figure is the worst run, not the average.</p>
+        </div>
+      </div>
+      <h3 class="label">Speed</h3>
+      <ul class="figures">
+        <li>
+          <div class="figure d">0.85 s</div>
+          <p class="what">from choosing a profile to the full ladder on screen</p>
+          <div class="meta">budget 3 s · worst of 5 · 2026-09-23</div>
+        </li>
+        <li>
+          <div class="figure d">0.58 s</div>
+          <p class="what">from sending the deposit to its confirmation</p>
+          <div class="meta">budget 5 s · worst of 3 · 2026-09-23</div>
+        </li>
+        <li>
+          <div class="figure d">0.94 s</div>
+          <p class="what">to the first screen of your position</p>
+          <div class="meta">budget 2 s · worst of 5 · 2026-09-23</div>
+        </li>
+        <li>
+          <div class="figure d">4.07 s</div>
+          <p class="what">from signing an exit to USDC in the wallet</p>
+          <div class="meta">budget 10 s · worst of 100, median 1.22 s · 2026-10-03</div>
+        </li>
+      </ul>
+      <h3 class="label">Accuracy</h3>
+      <ul class="figures figures-3">
+        <li>
+          <div class="figure d">8 <small>micro-USDC</small></div>
+          <p class="what">the largest gap between quote and payout over 100 exits of different sizes, on a 222.50 USDC quote</p>
+          <div class="meta">budget 0.1% · 0 refused · 2026-10-03</div>
+        </li>
+        <li>
+          <div class="figure d">0</div>
+          <p class="what">ladders with a rung below the profile's floor, over 200 generated catalogues</p>
+          <div class="meta">budget 0</div>
+        </li>
+        <li>
+          <div class="figure d">0</div>
+          <p class="what">micro-USDC lost to rounding over 1,000 deposits</p>
+          <div class="meta">budget 0</div>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="wrap section section-first" aria-labelledby="limits">
+    <aside class="sidebar">
+      <h2 class="d" id="limits"><em>What this isn't</em> (yet)</h2>
+      <div class="sidebar-cols">
+        <div>
+          <h3 class="label">Not yet</h3>
+          <ul>
+            <li>The ladder does not roll yet: when a rung matures, nothing reinvests it, so after the first maturity it stops being a ladder.</li>
+            <li>Nothing reacts to a rating downgrade yet.</li>
+            <li>The maintenance keeper is not running.</li>
+          </ul>
+        </div>
+        <div>
+          <h3 class="label">Not in this demo</h3>
+          <ul>
+            <li>Ratings are not Moody's or AlphaLedger. They come from our own oracle program over a fictional catalogue of issuers.</li>
+            <li>The instruments are not real bonds. Our own program issues and redeems them at an oracle price.</li>
+            <li>There is no slippage or market depth: the route is deterministic, so a quote matching its payout proves the arithmetic, not behaviour on a real market.</li>
+            <li>Devnet only, demo USDC, not audited, no KYC or any regulatory compliance.</li>
+          </ul>
+        </div>
+      </div>
+    </aside>
+  </section>
+
+  <section class="wrap section faq" aria-labelledby="questions">
+    <h2 class="d" id="questions">Questions</h2>
+    <dl>
+      <div class="faq-row">
+        <dt class="d">Is this real money?</dt>
+        <dd>No. It runs on Solana devnet with a demo USDC token the deployer mints. Nothing here is worth anything off devnet.</dd>
+      </div>
+      <div class="faq-row">
+        <dt class="d">Where do the ratings come from?</dt>
+        <dd>From our own rating-oracle program, over a catalogue of fictional issuers. The real feed this is designed for — Moody's ratings in token metadata on Solana — is a closed institutional API, so the demo does not use it.</dd>
+      </div>
+      <div class="faq-row">
+        <dt class="d">What happens when a rung matures?</dt>
+        <dd>Today, nothing: rolling a matured rung into a new 18-month one is the next milestone. Until then the ladder is a ladder only until its first maturity.</dd>
+      </div>
+    </dl>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <div>
+      <div class="d nameplate">BondLadder</div>
+      <p>Devnet only. Not audited. Apache-2.0.</p>
+      <p><a href="https://github.com/bondladder/BondLadder">Source on GitHub ↗</a></p>
+    </div>
+    <dl class="programs" aria-label="Program addresses on devnet">
+      <dt>bond_ladder</dt><dd>5aKvW5hFUGw5hKzpz5DRYBK26EADqRHHgknmCU1EGNHe</dd>
+      <dt>rating_oracle</dt><dd>EWhJjvNVb5mh1Jb9DTzvTwk7BeS9qdZdK7a6vdneQPa9</dd>
+      <dt>mock_issuer</dt><dd>EX1tNj2MLTacJPfAVzbBW8ejFsnSp7AsnZvnRLmDy3vK</dd>
+    </dl>
+  </div>
+</footer>
+</body>
+</html>

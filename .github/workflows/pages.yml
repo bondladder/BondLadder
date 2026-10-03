@@ -46,16 +46,29 @@ jobs:
       - run: pnpm --filter '!@bondladder/scripts' typecheck
       - run: pnpm -r test
 
-      # A project site lives under /<repo>/, so the bundle is built for that base.
-      # index.html is duplicated as 404.html: GitHub serves it for any deep link,
-      # and the router takes over from there.
-      - run: |
-          pnpm --filter @bondladder/web exec vite build --base="/${{ github.event.repository.name }}/"
-          cp apps/web/dist/index.html apps/web/dist/404.html
+      # A project site lives under /<repo>/: the landing (static, no build) at the
+      # root and the app under /<repo>/app/, so the bundle is built for that base.
+      - run: pnpm --filter @bondladder/web exec vite build --base="/${{ github.event.repository.name }}/app/"
+
+      # Pages has no SPA fallback and serves a custom 404 only from the site root,
+      # so the root 404.html is the app's own shell: a direct hit on
+      # /<repo>/app/exit gets it and the router takes over. Until the move the
+      # app lived at /<repo>/ itself, and links to /<repo>/exit are out there; the
+      # shell first sends any path outside app/ to the same route inside it.
+      - name: Assemble the site
+        env:
+          REPO: ${{ github.event.repository.name }}
+        run: |
+          mkdir -p site
+          cp -r apps/landing/. site/
+          cp -r apps/web/dist site/app
+          guard="<script>if(location.pathname.indexOf('/${REPO}/app/')!==0)location.replace('/${REPO}/app/'+location.pathname.slice('/${REPO}/'.length)+location.search+location.hash)</script>"
+          sed "s|<head>|<head>${guard}|" apps/web/dist/index.html > site/404.html
+          grep -qF "$guard" site/404.html
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: apps/web/dist
+          path: site
 
   deploy:
     needs: build
