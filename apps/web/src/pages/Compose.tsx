@@ -35,6 +35,7 @@ type Submission =
     | { kind: 'idle' }
     | { kind: 'custody' }
     | { kind: 'signing' }
+    | { kind: 'confirming' }
     | { kind: 'done'; signature: string }
     | { kind: 'failed'; reason: string };
 
@@ -111,10 +112,19 @@ export default function Compose() {
                     deposit,
                     connected.address,
                     sign,
-                    (step) => setSubmission({ kind: step === 'custody' ? 'custody' : 'signing' }),
+                    (step) =>
+                        setSubmission({
+                            kind: step === 'custody' ? 'custody' : step === 'deposit' ? 'signing' : 'confirming',
+                        }),
                 );
 
                 setSubmission({ kind: 'done', signature });
+
+                // The deposit has confirmed and moved USDC out of the wallet: the balance on
+                // screen is read from the chain again, not worked out from the amount sent.
+                readUsdcBalance(catalogue, connected.address)
+                    .then(setBalanceMicro)
+                    .catch(() => setBalanceMicro(null));
             } catch (failure) {
                 setSubmission({ kind: 'failed', reason: reason(failure) });
             }
@@ -253,7 +263,8 @@ export default function Compose() {
                                 connected === null ||
                                 shortOfBalance ||
                                 submission.kind === 'custody' ||
-                                submission.kind === 'signing'
+                                submission.kind === 'signing' ||
+                                submission.kind === 'confirming'
                             }
                             onClick={() => {
                                 if (outcome?.ok === true && depositMicro !== null) {
@@ -266,7 +277,9 @@ export default function Compose() {
                                 ? 'Preparing custody…'
                                 : submission.kind === 'signing'
                                   ? 'Waiting for your wallet…'
-                                  : 'Open position'}
+                                  : submission.kind === 'confirming'
+                                    ? 'Signed. Waiting for the network to confirm…'
+                                    : 'Open position'}
                         </button>
                         <p className="figure mt-2 text-[11px] text-ink-faint lg:text-right">
                             {connected === null

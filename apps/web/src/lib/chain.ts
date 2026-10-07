@@ -426,8 +426,17 @@ export async function readUsdcBalance(catalogue: Catalogue, owner: string): Prom
     return tokenAmountFrom(data);
 }
 
-/** What the screen is waiting for, so it can say which of the two signatures. */
-export type DepositStep = 'custody' | 'deposit';
+/** What the screen is waiting for: which of the two signatures, then the network. */
+export type DepositStep = 'custody' | 'deposit' | 'confirming';
+
+/** A deposit transaction is atomic: refused, it has moved no USDC. */
+function refuseDepositOn(err: unknown, what: string): void {
+    if (err === null || err === undefined) {
+        return;
+    }
+
+    throw new ProgramClientError(`The network refused the ${what}: ${JSON.stringify(err)}. No USDC has been moved.`);
+}
 
 /**
  * Opening the position: custody first if any of the five accounts is missing,
@@ -438,6 +447,10 @@ export type DepositStep = 'custody' | 'deposit';
  * 31 accounts — adding five creations to it lands at 1226 bytes against a
  * ceiling of 1232, with no room for a compute-unit limit. Kept apart, the
  * deposit stays exactly what SC-002 measures: one transaction, ≈114 000 CU.
+ *
+ * Each one is awaited to confirmation: the deposit is built against custody
+ * that must already exist, and the caller reads the position and the balance
+ * back from the chain as soon as this returns.
  */
 export async function openPosition(
     catalogue: Catalogue,
@@ -457,12 +470,12 @@ export async function openPosition(
     const missing = await missingCustody(vault.address, mints);
     if (missing.length > 0) {
         onStep('custody');
-        await sign(await buildCustodySetup(payer, vault.address, missing));
+        const setup = await sign(await buildCustodySetup(payer, vault.address, missing));
+        refuseDepositOn(await awaitSignature(setup), 'custody setup');
     }
 
     onStep('deposit');
-
-    return sign(
+    const signature = await sign(
         await buildDeposit({
             vault,
             owner: payer,
@@ -476,6 +489,11 @@ export async function openPosition(
             })),
         }),
     );
+
+    onStep('confirming');
+    refuseDepositOn(await awaitSignature(signature), 'deposit');
+
+    return signature;
 }
 
 /* ------------------------------------------------------------------ */
