@@ -31,6 +31,20 @@ impl IssuerConfig {
     pub const SEED: &'static [u8] = b"issuer";
 }
 
+/// What the issuer pays back at maturity (FR-026), returned so the caller
+/// reads the payout instead of re-deriving the issuer's arithmetic.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Redemption {
+    pub units: u64,
+    pub paid_micro: u64,
+}
+
 impl Instrument {
     pub const SEED: &'static [u8] = b"instrument";
+
+    /// The mint has no decimals, so one unit is one face value of 1 USDC. The
+    /// catalogue prices every instrument as a discount to it, and the discount
+    /// is the whole return to maturity: `coupon_bps` is a stated rate that
+    /// nothing pays out.
+    pub const PAR_MICRO: u64 = 1_000_000;
 }

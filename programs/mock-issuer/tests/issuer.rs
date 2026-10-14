@@ -33,7 +33,14 @@ const ERR_MATURITY_IN_THE_PAST: u32 = 6001;
 const ERR_AMOUNT_BELOW_UNIT_PRICE: u32 = 6002;
 const ERR_WRONG_USDC_MINT: u32 = 6003;
 const ERR_TREASURY_NOT_OWNED_BY_ISSUER: u32 = 6004;
+const ERR_NOT_YET_MATURED: u32 = 6005;
+const ERR_NOTHING_TO_REDEEM: u32 = 6006;
+const ERR_TREASURY_SHORT: u32 = 6007;
 const ERR_ANCHOR_HAS_ONE: u32 = 2001;
+const ERR_TOKEN_INSUFFICIENT_FUNDS: u32 = 1;
+
+const HELD_UNITS: u64 = 1_000;
+const TREASURY_BALANCE: u64 = 5_000_000_000;
 
 fn program_id() -> Pubkey {
     Pubkey::new_from_array(mock_issuer::ID.to_bytes())
@@ -263,8 +270,79 @@ fn buy_accounts() -> Vec<(Pubkey, Account)> {
     ]
 }
 
+fn redeem_ix(units: u64) -> Instruction {
+    let (config, _) = config_pda();
+    let (instrument, _) = instrument_pda(&INSTRUMENT_MINT);
+
+    Instruction::new_with_bytes(
+        program_id(),
+        &mock_issuer::instruction::RedeemAtMaturity { units }.data(),
+        vec![
+            AccountMeta::new_readonly(config, false),
+            AccountMeta::new_readonly(instrument, false),
+            AccountMeta::new(INSTRUMENT_MINT, false),
+            AccountMeta::new(BUYER_INSTRUMENT, false),
+            AccountMeta::new(BUYER_USDC, false),
+            AccountMeta::new(TREASURY, false),
+            AccountMeta::new_readonly(BUYER, true),
+            AccountMeta::new_readonly(mollusk_svm_programs_token::token::ID, false),
+        ],
+    )
+}
+
+fn instrument_mint_with_supply(supply: u64) -> Account {
+    let (config, _) = config_pda();
+
+    mollusk_svm_programs_token::token::create_account_for_mint(Mint {
+        mint_authority: COption::Some(config),
+        supply,
+        decimals: 0,
+        is_initialized: true,
+        freeze_authority: COption::None,
+    })
+}
+
+/// The holder bought at a discount long ago and the instrument matured
+/// exactly now: the earliest moment the issuer redeems at all.
+fn redeem_accounts() -> Vec<(Pubkey, Account)> {
+    let (config, _) = config_pda();
+    let (instrument, bump) = instrument_pda(&INSTRUMENT_MINT);
+
+    vec![
+        (config, initialized_config()),
+        (instrument, instrument_maturing_at(bump, NOW)),
+        (INSTRUMENT_MINT, instrument_mint_with_supply(HELD_UNITS)),
+        (
+            BUYER_INSTRUMENT,
+            token_account(INSTRUMENT_MINT, BUYER, HELD_UNITS),
+        ),
+        (BUYER_USDC, token_account(USDC_MINT, BUYER, 0)),
+        (TREASURY, token_account(USDC_MINT, config, TREASURY_BALANCE)),
+        (BUYER, payer()),
+        mollusk_svm_programs_token::token::keyed_account(),
+    ]
+}
+
+fn redeem_replacing(key: Pubkey, account: Account) -> Vec<(Pubkey, Account)> {
+    swap(redeem_accounts(), key, account)
+}
+
+fn redemption_bytes(units: u64, paid_micro: u64) -> Vec<u8> {
+    let mut bytes = units.to_le_bytes().to_vec();
+    bytes.extend_from_slice(&paid_micro.to_le_bytes());
+
+    bytes
+}
+
 fn replacing(key: Pubkey, account: Account) -> Vec<(Pubkey, Account)> {
-    let mut accounts = buy_accounts();
+    swap(buy_accounts(), key, account)
+}
+
+fn swap(
+    mut accounts: Vec<(Pubkey, Account)>,
+    key: Pubkey,
+    account: Account,
+) -> Vec<(Pubkey, Account)> {
     let slot = accounts
         .iter_mut()
         .find(|(existing, _)| *existing == key)
@@ -515,6 +593,132 @@ fn mint_for_usdc_refuses_a_treasury_the_issuer_does_not_own() {
     mollusk.process_and_validate_instruction(
         &mint_for_usdc_ix(BUYER_USDC_BALANCE),
         &replacing(TREASURY, token_account(USDC_MINT, BUYER, 0)),
+        &[Check::err(ProgramError::Custom(
+            ERR_TREASURY_NOT_OWNED_BY_ISSUER,
+        ))],
+    );
+}
+
+#[test]
+fn redeem_at_maturity_burns_the_units_and_pays_par_for_each() {
+    let mollusk = setup();
+    let paid = HELD_UNITS * Instrument::PAR_MICRO;
+
+    let result = mollusk.process_and_validate_instruction(
+        &redeem_ix(HELD_UNITS),
+        &redeem_accounts(),
+        &[
+            Check::success(),
+            Check::return_data(&redemption_bytes(HELD_UNITS, paid)),
+        ],
+    );
+
+    assert_eq!(token_balance(&result, &BUYER_INSTRUMENT), 0);
+    assert_eq!(token_balance(&result, &BUYER_USDC), paid);
+    assert_eq!(token_balance(&result, &TREASURY), TREASURY_BALANCE - paid);
+
+    let minted = result.get_account(&INSTRUMENT_MINT).expect("mint exists");
+    assert_eq!(
+        Mint::unpack(&minted.data).expect("mint unpacks").supply,
+        0,
+        "redeemed units must leave the supply, not sit with the issuer"
+    );
+}
+
+/// Par, not the price the instrument was bought at: the discount to par is
+/// the whole return of the catalogue's zero-coupon pricing.
+#[test]
+fn redeem_at_maturity_pays_par_whatever_the_recorded_price() {
+    let mollusk = setup();
+    let paid = 7 * Instrument::PAR_MICRO;
+
+    let result = mollusk.process_and_validate_instruction(
+        &redeem_ix(7),
+        &redeem_accounts(),
+        &[
+            Check::success(),
+            Check::return_data(&redemption_bytes(7, paid)),
+        ],
+    );
+
+    assert!(paid > 7 * PRICE_MICRO);
+    assert_eq!(token_balance(&result, &BUYER_INSTRUMENT), HELD_UNITS - 7);
+    assert_eq!(token_balance(&result, &BUYER_USDC), paid);
+}
+
+#[test]
+fn redeem_at_maturity_refuses_a_second_before_maturity() {
+    let mollusk = setup();
+    let (instrument, bump) = instrument_pda(&INSTRUMENT_MINT);
+
+    mollusk.process_and_validate_instruction(
+        &redeem_ix(HELD_UNITS),
+        &redeem_replacing(instrument, instrument_maturing_at(bump, NOW + 1)),
+        &[Check::err(ProgramError::Custom(ERR_NOT_YET_MATURED))],
+    );
+}
+
+#[test]
+fn redeem_at_maturity_refuses_zero_units() {
+    let mollusk = setup();
+
+    mollusk.process_and_validate_instruction(
+        &redeem_ix(0),
+        &redeem_accounts(),
+        &[Check::err(ProgramError::Custom(ERR_NOTHING_TO_REDEEM))],
+    );
+}
+
+/// The treasury holds only what buyers paid, which is below par, so a short
+/// treasury is the normal state until someone funds it. Refusing whole keeps
+/// the units with the holder instead of burning them for a partial payout.
+#[test]
+fn redeem_at_maturity_refuses_whole_when_the_treasury_cannot_pay_par() {
+    let mollusk = setup();
+    let (config, _) = config_pda();
+    let short = HELD_UNITS * Instrument::PAR_MICRO - 1;
+
+    mollusk.process_and_validate_instruction(
+        &redeem_ix(HELD_UNITS),
+        &redeem_replacing(TREASURY, token_account(USDC_MINT, config, short)),
+        &[Check::err(ProgramError::Custom(ERR_TREASURY_SHORT))],
+    );
+}
+
+#[test]
+fn redeem_at_maturity_cannot_redeem_more_than_the_holder_has() {
+    let mollusk = setup();
+
+    mollusk.process_and_validate_instruction(
+        &redeem_ix(HELD_UNITS + 1),
+        &redeem_accounts(),
+        &[Check::err(ProgramError::Custom(
+            ERR_TOKEN_INSUFFICIENT_FUNDS,
+        ))],
+    );
+}
+
+#[test]
+fn redeem_at_maturity_pays_out_only_in_usdc() {
+    let mollusk = setup();
+
+    mollusk.process_and_validate_instruction(
+        &redeem_ix(HELD_UNITS),
+        &redeem_replacing(BUYER_USDC, token_account(INSTRUMENT_MINT, BUYER, 0)),
+        &[Check::err(ProgramError::Custom(ERR_WRONG_USDC_MINT))],
+    );
+}
+
+#[test]
+fn redeem_at_maturity_pays_only_from_the_issuer_treasury() {
+    let mollusk = setup();
+
+    mollusk.process_and_validate_instruction(
+        &redeem_ix(HELD_UNITS),
+        &redeem_replacing(
+            TREASURY,
+            token_account(USDC_MINT, STRANGER, TREASURY_BALANCE),
+        ),
         &[Check::err(ProgramError::Custom(
             ERR_TREASURY_NOT_OWNED_BY_ISSUER,
         ))],

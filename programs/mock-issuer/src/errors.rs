@@ -12,4 +12,10 @@ pub enum IssuerError {
     WrongUsdcMint,
     #[msg("Скарбниця має належати емітенту")]
     TreasuryNotOwnedByIssuer,
+    #[msg("The instrument has not matured yet")]
+    NotYetMatured,
+    #[msg("Nothing to redeem")]
+    NothingToRedeem,
+    #[msg("The issuer treasury cannot pay par for these units")]
+    TreasuryShort,
 }

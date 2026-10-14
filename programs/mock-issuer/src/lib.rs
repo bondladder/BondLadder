@@ -7,7 +7,7 @@ pub mod state;
 
 use errors::IssuerError;
 use instructions::*;
-use state::{Fill, Instrument, IssuerConfig};
+use state::{Fill, Instrument, IssuerConfig, Redemption};
 
 declare_id!("EX1tNj2MLTacJPfAVzbBW8ejFsnSp7AsnZvnRLmDy3vK");
 
@@ -61,6 +61,10 @@ pub mod mock_issuer {
 
     pub fn mint_for_usdc(ctx: Context<MintForUsdc>, amount_micro: u64) -> Result<Fill> {
         instructions::mint_for_usdc::handler(ctx, amount_micro)
+    }
+
+    pub fn redeem_at_maturity(ctx: Context<RedeemAtMaturity>, units: u64) -> Result<Redemption> {
+        instructions::redeem_at_maturity::redeem_at_maturity(ctx, units)
     }
 }
 
