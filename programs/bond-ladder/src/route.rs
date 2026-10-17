@@ -9,6 +9,7 @@
 //! бюджет — це стеля, а щабель без жодної одиниці щаблем не є.
 
 use anchor_lang::prelude::*;
+use anchor_spl::token::TokenAccount;
 
 use crate::errors::LadderError;
 
@@ -58,6 +59,78 @@ pub fn buy_for_usdc(
     .get();
 
     accept_fill(fill.units, fill.spent_micro, budget_micro)
+}
+
+/// The accounts of a redemption in the vault's terms: the holder gives up
+/// instrument units and is paid USDC.
+pub struct RedemptionVenue<'info> {
+    pub program: AccountInfo<'info>,
+    pub config: AccountInfo<'info>,
+    pub instrument: AccountInfo<'info>,
+    pub instrument_mint: AccountInfo<'info>,
+    pub holder_instrument: AccountInfo<'info>,
+    pub holder_usdc: AccountInfo<'info>,
+    pub venue_usdc: AccountInfo<'info>,
+    pub authority: AccountInfo<'info>,
+    pub token_program: AccountInfo<'info>,
+}
+
+/// Redeems matured units and returns the USDC that actually reached the
+/// holder, read off its balance rather than taken from the route's report.
+pub fn redeem_at_maturity(
+    venue: RedemptionVenue<'_>,
+    units: u64,
+    signer_seeds: &[&[&[u8]]],
+) -> Result<u64> {
+    let holder_usdc = venue.holder_usdc.clone();
+    let before = usdc_balance(&holder_usdc)?;
+
+    let redemption = mock_issuer::cpi::redeem_at_maturity(
+        CpiContext::new_with_signer(
+            venue.program,
+            mock_issuer::cpi::accounts::RedeemAtMaturity {
+                config: venue.config,
+                instrument: venue.instrument,
+                mint: venue.instrument_mint,
+                holder_instrument: venue.holder_instrument,
+                holder_usdc: venue.holder_usdc,
+                treasury: venue.venue_usdc,
+                holder: venue.authority,
+                token_program: venue.token_program,
+            },
+            signer_seeds,
+        ),
+        units,
+    )?
+    .get();
+
+    let received = usdc_balance(&holder_usdc)?
+        .checked_sub(before)
+        .ok_or_else(|| error!(LadderError::RedemptionMisreported))?;
+
+    accept_redemption(units, redemption.units, redemption.paid_micro, received)
+}
+
+fn usdc_balance(account: &AccountInfo<'_>) -> Result<u64> {
+    let data = account.try_borrow_data()?;
+
+    Ok(TokenAccount::try_deserialize(&mut &data[..])?.amount)
+}
+
+pub fn accept_redemption(
+    requested_units: u64,
+    reported_units: u64,
+    reported_paid_micro: u64,
+    received_micro: u64,
+) -> Result<u64> {
+    require!(
+        reported_units == requested_units
+            && reported_paid_micro == received_micro
+            && received_micro > 0,
+        LadderError::RedemptionMisreported
+    );
+
+    Ok(received_micro)
 }
 
 pub fn accept_fill(units: u64, spent_micro: u64, budget_micro: u64) -> Result<RouteFill> {
@@ -114,6 +187,47 @@ mod tests {
         assert_eq!(
             error_code(accept_fill(0, 0, BUDGET)),
             u32::from(LadderError::RouteFilledNothing)
+        );
+    }
+
+    fn redemption_error(result: Result<u64>) -> u32 {
+        match result.expect_err("expected a refusal") {
+            Error::AnchorError(err) => err.error_code_number,
+            Error::ProgramError(_) => panic!("expected a named error"),
+        }
+    }
+
+    #[test]
+    fn a_redemption_paid_as_reported_passes_the_payout_through() {
+        assert_eq!(
+            accept_redemption(200, 200, 200_000_000, 200_000_000).expect("the route paid"),
+            200_000_000
+        );
+    }
+
+    /// The vault spends what arrived, not what the route says arrived: a
+    /// payout short of the report would be made up from the pool's USDC.
+    #[test]
+    fn a_redemption_that_paid_less_than_reported_is_refused() {
+        assert_eq!(
+            redemption_error(accept_redemption(200, 200, 200_000_000, 199_999_999)),
+            u32::from(LadderError::RedemptionMisreported)
+        );
+    }
+
+    #[test]
+    fn a_redemption_of_other_units_than_requested_is_refused() {
+        assert_eq!(
+            redemption_error(accept_redemption(200, 199, 199_000_000, 199_000_000)),
+            u32::from(LadderError::RedemptionMisreported)
+        );
+    }
+
+    #[test]
+    fn a_redemption_that_paid_nothing_is_refused() {
+        assert_eq!(
+            redemption_error(accept_redemption(200, 200, 0, 0)),
+            u32::from(LadderError::RedemptionMisreported)
         );
     }
 }

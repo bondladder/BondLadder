@@ -26,7 +26,7 @@ pub enum LadderError {
     RouteOverspent,
     #[msg("Маршрут ліквідності не видав жодної одиниці інструмента")]
     RouteFilledNothing,
-    #[msg("Vault на паузі: нові депозити не приймаються")]
+    #[msg("The vault is paused: deposits and maintenance are stopped")]
     VaultPaused,
     #[msg("Депозит менший за мінімальний для цього vault")]
     DepositBelowMinimum,
@@ -60,4 +60,8 @@ pub enum LadderError {
     RungInstrumentMismatch,
     #[msg("The exit would pay less than the floor signed for with the quote")]
     QuoteDrift,
+    #[msg("The rung has not matured yet, so there is nothing to maintain")]
+    NothingToMaintain,
+    #[msg("The route reported a redemption other than what it paid into the vault")]
+    RedemptionMisreported,
 }

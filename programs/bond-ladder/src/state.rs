@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::errors::LadderError;
-use crate::profiles::{RiskProfile, RUNG_COUNT};
+use crate::profiles::{RiskProfile, RUNG_COUNT, RUNG_MONTHS};
 
 pub const BPS_DENOMINATOR: u16 = 10_000;
 
@@ -125,6 +125,45 @@ pub struct Position {
 
 impl Position {
     pub const SEED: &'static [u8] = b"position";
+
+    /// Replaces the rung at `index` with `next` and returns the one it
+    /// replaced. The ladder stays ordered by maturity, and every slot is
+    /// relabelled with its place on the grid: after a roll the old 6-month
+    /// rung is the one maturing next, and the dashboard reads it as such.
+    pub fn roll(&mut self, index: usize, next: Rung) -> Result<Rung> {
+        require!(index < RUNG_COUNT, LadderError::RungOutOfGrid);
+
+        let matured = self.rungs[index];
+        let mut rungs = [Rung::default(); RUNG_COUNT];
+        let mut staying = self
+            .rungs
+            .iter()
+            .enumerate()
+            .filter(|(slot, _)| *slot != index)
+            .map(|(_, rung)| *rung)
+            .peekable();
+        let mut placed = false;
+
+        for (slot, months) in rungs.iter_mut().zip(RUNG_MONTHS) {
+            let take_next = !placed
+                && staying
+                    .peek()
+                    .is_none_or(|rung| rung.maturity_ts > next.maturity_ts);
+            *slot = if take_next {
+                placed = true;
+                next
+            } else {
+                staying
+                    .next()
+                    .ok_or_else(|| error!(LadderError::RungOutOfGrid))?
+            };
+            slot.target_months = months;
+        }
+
+        self.rungs = rungs;
+
+        Ok(matured)
+    }
 }
 
 /// Units of one instrument the backstop pool has bought back on exits and
@@ -413,6 +452,139 @@ mod tests {
         assert_eq!(short.backstop_free_usdc, THOUSAND_USDC);
         assert_eq!(short.total_principal_usdc, 3 * THOUSAND_USDC);
         assert_eq!(short.backstop_locked_value, 7);
+    }
+
+    const DAY: i64 = 86_400;
+    const OPENED_AT: i64 = 1_800_000_000;
+    const DAYS: [i64; RUNG_COUNT] = [91, 183, 274, 365, 548];
+
+    fn rung(tag: u8, months: u8, maturity_ts: i64) -> Rung {
+        Rung {
+            target_months: months,
+            instrument: Pubkey::new_from_array([tag; 32]),
+            amount: 200 + u64::from(tag),
+            entry_price_micro: 990_000 - u64::from(tag),
+            entry_notch: tag,
+            maturity_ts,
+            flagged: false,
+        }
+    }
+
+    fn ladder() -> Position {
+        let mut rungs = [Rung::default(); RUNG_COUNT];
+        for (index, slot) in rungs.iter_mut().enumerate() {
+            *slot = rung(
+                index as u8 + 1,
+                RUNG_MONTHS[index],
+                OPENED_AT + DAYS[index] * DAY,
+            );
+        }
+
+        Position {
+            owner: Pubkey::default(),
+            profile: RiskProfile::Balanced,
+            rungs,
+            principal_usdc: 1_000_000_000,
+            fee_accrued: 0,
+            last_fee_ts: OPENED_AT,
+            opened_at: OPENED_AT,
+            bump: 254,
+        }
+    }
+
+    fn labels(position: &Position) -> [u8; RUNG_COUNT] {
+        position.rungs.map(|rung| rung.target_months)
+    }
+
+    fn tags(position: &Position) -> [u8; RUNG_COUNT] {
+        position.rungs.map(|rung| rung.instrument.to_bytes()[0])
+    }
+
+    /// The ladder after a roll reads as it did after the deposit: nearest
+    /// maturity first, every slot labelled with its place on the grid.
+    #[test]
+    fn rolling_the_nearest_rung_shifts_the_rest_down_and_appends_the_new_one() {
+        let mut position = ladder();
+        let before = position.rungs;
+        let rolled_at = OPENED_AT + DAYS[0] * DAY;
+        let next = rung(9, 18, rolled_at + 548 * DAY);
+
+        let matured = position.roll(0, next).expect("the rung is in the ladder");
+
+        assert_eq!(matured, before[0]);
+        assert_eq!(tags(&position), [2, 3, 4, 5, 9]);
+        assert_eq!(labels(&position), RUNG_MONTHS);
+        for (slot, shifted) in position.rungs[..RUNG_COUNT - 1].iter().enumerate() {
+            assert_eq!(
+                Rung {
+                    target_months: before[slot + 1].target_months,
+                    ..*shifted
+                },
+                before[slot + 1],
+                "only the label of a shifted rung changes"
+            );
+        }
+        assert_eq!(
+            position.rungs[RUNG_COUNT - 1],
+            Rung {
+                target_months: 18,
+                ..next
+            }
+        );
+    }
+
+    /// The 18-month window is wide enough for the new instrument to mature
+    /// before the old longest rung does; the ladder stays ordered anyway.
+    #[test]
+    fn a_new_rung_shorter_than_the_old_longest_takes_its_place_by_maturity() {
+        let mut position = ladder();
+        let next = rung(9, 18, OPENED_AT + DAYS[4] * DAY - 1);
+
+        position.roll(0, next).expect("the rung is in the ladder");
+
+        assert_eq!(tags(&position), [2, 3, 4, 9, 5]);
+        assert_eq!(labels(&position), RUNG_MONTHS);
+    }
+
+    #[test]
+    fn a_new_rung_maturing_with_the_old_longest_goes_after_it() {
+        let mut position = ladder();
+        let next = rung(9, 18, OPENED_AT + DAYS[4] * DAY);
+
+        position.roll(0, next).expect("the rung is in the ladder");
+
+        assert_eq!(tags(&position), [2, 3, 4, 5, 9]);
+    }
+
+    /// A keeper that was down for months finds a later rung matured first,
+    /// as can a rung of the same maturity listed further down.
+    #[test]
+    fn a_rung_other_than_the_nearest_can_be_rolled() {
+        let mut position = ladder();
+        let before = position.rungs;
+        let next = rung(9, 18, OPENED_AT + 700 * DAY);
+
+        let matured = position.roll(2, next).expect("the rung is in the ladder");
+
+        assert_eq!(matured, before[2]);
+        assert_eq!(tags(&position), [1, 2, 4, 5, 9]);
+        assert_eq!(labels(&position), RUNG_MONTHS);
+    }
+
+    #[test]
+    fn an_index_outside_the_ladder_changes_nothing() {
+        let mut position = ladder();
+        let before = position.rungs;
+
+        assert_eq!(
+            error_code(
+                position
+                    .roll(RUNG_COUNT, rung(9, 18, OPENED_AT))
+                    .map(|_| ())
+            ),
+            u32::from(LadderError::RungOutOfGrid)
+        );
+        assert_eq!(position.rungs, before);
     }
 
     #[test]

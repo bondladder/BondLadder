@@ -61,4 +61,14 @@ pub mod bond_ladder {
     ) -> Result<()> {
         instructions::exit_ladder::exit_ladder(ctx, share_bps, min_payout_micro)
     }
+
+    /// The five instruments of the position come in `remaining_accounts`, one
+    /// per rung in rung order: they price the fee and name the issuers the
+    /// roll is checked against.
+    pub fn maintain<'info>(
+        ctx: Context<'_, '_, '_, 'info, Maintain<'info>>,
+        rung_index: u8,
+    ) -> Result<()> {
+        instructions::maintain::maintain(ctx, rung_index)
+    }
 }

@@ -165,6 +165,54 @@ pub fn verify_proposal(
     Ok(())
 }
 
+/// A matured rung is reinvested in the longest rung of the grid (FR-017).
+pub const ROLL_MONTHS: u8 = RUNG_MONTHS[RUNG_COUNT - 1];
+
+/// The instrument a matured rung is rolled into, reduced to the fields the
+/// check reads.
+#[derive(Clone, Copy, Debug)]
+pub struct RollCandidate {
+    pub issuer_id: [u8; 16],
+    pub maturity_ts: i64,
+    pub notch: u8,
+}
+
+/// The roll is held to the deposit's own constraints (FR-005, FR-006), with
+/// the 18-month window taken from the moment of the roll.
+///
+/// Concentration is counted in rungs, not in sums: a rolled rung carries face
+/// value plus the yield, so it outweighs the others, and a sum-based share
+/// would refuse every conservative roll into five distinct issuers.
+pub fn verify_roll(
+    profile: RiskProfile,
+    now_ts: i64,
+    next: &RollCandidate,
+    staying_issuers: &[[u8; 16]; RUNG_COUNT - 1],
+) -> Result<()> {
+    require!(
+        profile.admits_rating(next.notch),
+        LadderError::RatingBelowFloor
+    );
+
+    let window = rung_window(now_ts, ROLL_MONTHS)?;
+    require!(
+        next.maturity_ts >= window.from_ts && next.maturity_ts < window.to_ts,
+        LadderError::MaturityOutsideWindow
+    );
+
+    let rungs_held = staying_issuers
+        .iter()
+        .filter(|issuer_id| **issuer_id == next.issuer_id)
+        .count()
+        + 1;
+    require!(
+        profile.admits_issuer_share(issuer_share_bps(rungs_held as u64, RUNG_COUNT as u64)?),
+        LadderError::IssuerLimitExceeded
+    );
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -412,6 +460,131 @@ mod tests {
         );
     }
 
+    fn staying_issuers() -> [[u8; 16]; RUNG_COUNT - 1] {
+        [issuer(1), issuer(2), issuer(3), issuer(4)]
+    }
+
+    /// A fresh issuer, rated exactly at the floor, maturing exactly on the
+    /// 18-month target.
+    fn roll_candidate(profile: RiskProfile, now_ts: i64) -> RollCandidate {
+        RollCandidate {
+            issuer_id: issuer(0x80),
+            maturity_ts: rung_target_ts(now_ts, ROLL_MONTHS).expect("the target is computed"),
+            notch: profile.worst_allowed_notch(),
+        }
+    }
+
+    #[test]
+    fn the_roll_goes_into_the_longest_rung_of_the_grid() {
+        assert_eq!(ROLL_MONTHS, 18);
+    }
+
+    #[test]
+    fn a_roll_within_every_constraint_passes() {
+        for profile in [RiskProfile::Conservative, RiskProfile::Balanced] {
+            verify_roll(
+                profile,
+                NOW,
+                &roll_candidate(profile, NOW),
+                &staying_issuers(),
+            )
+            .expect("the candidate meets every constraint");
+        }
+    }
+
+    #[test]
+    fn a_roll_into_an_instrument_below_the_floor_is_refused() {
+        for profile in [RiskProfile::Conservative, RiskProfile::Balanced] {
+            let candidate = RollCandidate {
+                notch: profile.worst_allowed_notch() + 1,
+                ..roll_candidate(profile, NOW)
+            };
+
+            assert_eq!(
+                error_code(verify_roll(profile, NOW, &candidate, &staying_issuers())),
+                u32::from(LadderError::RatingBelowFloor)
+            );
+        }
+    }
+
+    /// The window is the 18-month rung's as of the roll, not as of the
+    /// deposit: the roll reinstates the ladder's duration from today.
+    #[test]
+    fn a_roll_matures_inside_the_eighteen_month_window_as_of_the_roll() {
+        let profile = RiskProfile::Balanced;
+        let rolled_at = NOW + 91 * SECONDS_PER_DAY;
+        let window = rung_window(rolled_at, ROLL_MONTHS).expect("the grid");
+        let at = |maturity_ts| RollCandidate {
+            maturity_ts,
+            ..roll_candidate(profile, rolled_at)
+        };
+
+        verify_roll(profile, rolled_at, &at(window.from_ts), &staying_issuers())
+            .expect("the lower edge is inclusive");
+        verify_roll(
+            profile,
+            rolled_at,
+            &at(window.to_ts - 1),
+            &staying_issuers(),
+        )
+        .expect("a second before the upper edge");
+
+        for outside in [
+            window.from_ts - 1,
+            window.to_ts,
+            rung_target_ts(rolled_at, 12).expect("the 12-month target"),
+        ] {
+            assert_eq!(
+                error_code(verify_roll(
+                    profile,
+                    rolled_at,
+                    &at(outside),
+                    &staying_issuers()
+                )),
+                u32::from(LadderError::MaturityOutsideWindow),
+                "{outside}"
+            );
+        }
+    }
+
+    /// After a roll the rungs no longer hold equal sums, so the limit is read
+    /// as the profile defines it — in rungs: one per issuer for conservative,
+    /// two for balanced.
+    #[test]
+    fn the_issuer_limit_after_a_roll_counts_rungs_not_sums() {
+        let mut one_shared = staying_issuers();
+        one_shared[0] = issuer(0x80);
+
+        assert_eq!(
+            error_code(verify_roll(
+                RiskProfile::Conservative,
+                NOW,
+                &roll_candidate(RiskProfile::Conservative, NOW),
+                &one_shared
+            )),
+            u32::from(LadderError::IssuerLimitExceeded)
+        );
+        verify_roll(
+            RiskProfile::Balanced,
+            NOW,
+            &roll_candidate(RiskProfile::Balanced, NOW),
+            &one_shared,
+        )
+        .expect("two rungs of one issuer are exactly the balanced limit");
+
+        let mut two_shared = one_shared;
+        two_shared[3] = issuer(0x80);
+        assert_eq!(
+            error_code(verify_roll(
+                RiskProfile::Balanced,
+                NOW,
+                &roll_candidate(RiskProfile::Balanced, NOW),
+                &two_shared
+            )),
+            u32::from(LadderError::IssuerLimitExceeded)
+        );
+    }
+
     #[test]
     fn rungs_out_of_the_grid_order_are_refused() {
         let profile = RiskProfile::Conservative;
@@ -543,6 +716,72 @@ mod tests {
                     )),
                     u32::from(LadderError::IssuerLimitExceeded),
                     "каталог {catalog}, щабель {index}"
+                );
+
+                refused += 3;
+            }
+        }
+
+        assert_eq!(refused, 200 * 2 * 3);
+    }
+
+    /// SC-004 after a roll, on 200 generated catalogs: no roll with a violation
+    /// passes, and — so the criterion is not vacuous — a roll without one does.
+    #[test]
+    fn no_roll_with_a_violation_passes_on_two_hundred_generated_catalogs() {
+        let mut refused = 0usize;
+
+        for catalog in 0..200u64 {
+            let mut rng = Rng(0xD1B5_4A32_D192_ED03 ^ (catalog + 1));
+
+            for profile in [RiskProfile::Conservative, RiskProfile::Balanced] {
+                let rolled_at = NOW + rng.below(10_000_000) as i64;
+                let window = rung_window(rolled_at, ROLL_MONTHS).expect("the grid");
+                let span = (window.to_ts - window.from_ts) as u64;
+                let candidate = RollCandidate {
+                    issuer_id: issuer(0x80),
+                    maturity_ts: window.from_ts + rng.below(span) as i64,
+                    notch: 1 + rng.below(u64::from(profile.worst_allowed_notch())) as u8,
+                };
+                let staying = staying_issuers();
+
+                verify_roll(profile, rolled_at, &candidate, &staying)
+                    .expect("the roll is drawn within every constraint");
+
+                let below_floor = RollCandidate {
+                    notch: profile.worst_allowed_notch() + 1,
+                    ..candidate
+                };
+                assert_eq!(
+                    error_code(verify_roll(profile, rolled_at, &below_floor, &staying)),
+                    u32::from(LadderError::RatingBelowFloor),
+                    "catalog {catalog}"
+                );
+
+                let outside = RollCandidate {
+                    maturity_ts: if rng.below(2) == 0 {
+                        window.from_ts - 1 - rng.below(span) as i64
+                    } else {
+                        window.to_ts + rng.below(span) as i64
+                    },
+                    ..candidate
+                };
+                assert_eq!(
+                    error_code(verify_roll(profile, rolled_at, &outside, &staying)),
+                    u32::from(LadderError::MaturityOutsideWindow),
+                    "catalog {catalog}"
+                );
+
+                let allowed = usize::from(profile.max_issuer_bps() / 2_000);
+                let mut concentrated = staying;
+                let first = rng.below(RUNG_COUNT as u64 - 1) as usize;
+                for offset in 0..allowed {
+                    concentrated[(first + offset) % (RUNG_COUNT - 1)] = candidate.issuer_id;
+                }
+                assert_eq!(
+                    error_code(verify_roll(profile, rolled_at, &candidate, &concentrated)),
+                    u32::from(LadderError::IssuerLimitExceeded),
+                    "catalog {catalog}"
                 );
 
                 refused += 3;
