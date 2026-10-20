@@ -164,6 +164,34 @@ impl Position {
 
         Ok(matured)
     }
+
+    /// Flags every rung rated below the profile floor (FR-019) and returns
+    /// how many were flagged now. `None` is a rating the oracle cannot vouch
+    /// for (FR-025) and gives no verdict either way. A flag is a decision to
+    /// withdraw, not a mirror of the rating, so a recovery never clears it:
+    /// only the rung leaving the ladder at maturity does.
+    pub fn flag_breaches(&mut self, notches: &[Option<u8>; RUNG_COUNT]) -> usize {
+        let profile = self.profile;
+        let mut flagged = 0;
+        for (rung, notch) in self.rungs.iter_mut().zip(notches) {
+            let breached = notch.is_some_and(|notch| !profile.admits_rating(notch));
+            if breached && rung.amount > 0 && !rung.flagged {
+                rung.flagged = true;
+                flagged += 1;
+            }
+        }
+
+        flagged
+    }
+
+    /// Whether a rung other than `except` holds `instrument` under a flag:
+    /// new money must not go into it (FR-019), even once its rating is back.
+    pub fn holds_flagged(&self, instrument: &Pubkey, except: usize) -> bool {
+        self.rungs
+            .iter()
+            .enumerate()
+            .any(|(slot, rung)| slot != except && rung.flagged && rung.instrument == *instrument)
+    }
 }
 
 /// Units of one instrument the backstop pool has bought back on exits and
@@ -585,6 +613,98 @@ mod tests {
             u32::from(LadderError::RungOutOfGrid)
         );
         assert_eq!(position.rungs, before);
+    }
+
+    fn floor() -> u8 {
+        RiskProfile::Balanced.worst_allowed_notch()
+    }
+
+    fn flags(position: &Position) -> [bool; RUNG_COUNT] {
+        position.rungs.map(|rung| rung.flagged)
+    }
+
+    #[test]
+    fn a_rung_rated_below_the_profile_floor_is_flagged() {
+        let mut position = ladder();
+        let mut notches = [Some(floor()); RUNG_COUNT];
+        notches[2] = Some(floor() + 1);
+
+        assert_eq!(position.flag_breaches(&notches), 1);
+        assert_eq!(flags(&position), [false, false, true, false, false]);
+    }
+
+    #[test]
+    fn a_rating_exactly_on_the_floor_flags_nothing() {
+        let mut position = ladder();
+
+        assert_eq!(position.flag_breaches(&[Some(floor()); RUNG_COUNT]), 0);
+        assert_eq!(flags(&position), [false; RUNG_COUNT]);
+    }
+
+    /// An oracle that has lapsed says nothing about the rung, and a verdict
+    /// drawn from silence would flag every position of the vault at once.
+    #[test]
+    fn a_rung_without_a_usable_rating_is_left_as_it_is() {
+        let mut position = ladder();
+        position.rungs[1].flagged = true;
+
+        assert_eq!(position.flag_breaches(&[None; RUNG_COUNT]), 0);
+        assert_eq!(flags(&position), [false, true, false, false, false]);
+    }
+
+    #[test]
+    fn a_rung_already_flagged_is_not_counted_again() {
+        let mut position = ladder();
+        position.rungs[3].flagged = true;
+        let notches = [Some(floor() + 1); RUNG_COUNT];
+
+        assert_eq!(position.flag_breaches(&notches), 4);
+        assert_eq!(flags(&position), [true; RUNG_COUNT]);
+    }
+
+    #[test]
+    fn a_recovered_rating_does_not_clear_the_flag() {
+        let mut position = ladder();
+        position.rungs[0].flagged = true;
+
+        assert_eq!(position.flag_breaches(&[Some(1); RUNG_COUNT]), 0);
+        assert!(position.rungs[0].flagged);
+    }
+
+    /// An exit can whittle a rung down to nothing; there is no money left in
+    /// it to withdraw, so flagging it would be maintenance of nothing.
+    #[test]
+    fn an_emptied_rung_is_not_flagged() {
+        let mut position = ladder();
+        position.rungs[4].amount = 0;
+
+        assert_eq!(
+            position.flag_breaches(&[Some(floor() + 1); RUNG_COUNT]),
+            RUNG_COUNT - 1
+        );
+        assert!(!position.rungs[4].flagged);
+    }
+
+    #[test]
+    fn an_instrument_flagged_on_a_staying_rung_is_found() {
+        let mut position = ladder();
+        position.rungs[4].flagged = true;
+        let instrument = position.rungs[4].instrument;
+
+        assert!(position.holds_flagged(&instrument, 0));
+        assert!(!position.holds_flagged(&position.rungs[3].instrument, 0));
+    }
+
+    /// The rung being rolled leaves the ladder in the same transaction, so its
+    /// own flag does not hold the instrument it is rolled out of.
+    #[test]
+    fn the_flag_of_the_rung_being_rolled_does_not_count() {
+        let mut position = ladder();
+        position.rungs[0].flagged = true;
+        let instrument = position.rungs[0].instrument;
+
+        assert!(!position.holds_flagged(&instrument, 0));
+        assert!(position.holds_flagged(&instrument, 1));
     }
 
     #[test]

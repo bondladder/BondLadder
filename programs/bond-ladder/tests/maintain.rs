@@ -34,6 +34,7 @@ const OPENED_AT: i64 = 1_800_000_000;
 const DAY: i64 = 86_400;
 const RUNG_DAYS: [i64; RUNG_COUNT] = [91, 183, 274, 365, 548];
 const ROLLED_AT: i64 = OPENED_AT + RUNG_DAYS[0] * DAY;
+const CHECKED_AT: i64 = OPENED_AT + 30 * DAY;
 const MAX_AGE_SECS: i64 = DAY;
 
 const USDC_MINT: Pubkey = Pubkey::new_from_array([7u8; 32]);
@@ -49,6 +50,8 @@ const POOL_UNITS: u64 = 50;
 const UNIT_PRICE: u64 = 990_000;
 const NEXT_PRICE: u64 = 960_000;
 const NOTCH: u8 = 5;
+/// One notch under A-, the conservative floor.
+const FALLEN_NOTCH: u8 = 8;
 const NEXT_INDEX: usize = 9;
 
 const THOUSAND_USDC: u64 = 1_000_000_000;
@@ -74,9 +77,12 @@ const ERR_ISSUER_LIMIT_EXCEEDED: u32 = 6008;
 const ERR_VAULT_PAUSED: u32 = 6012;
 const ERR_RATING_UNUSABLE: u32 = 6016;
 const ERR_RATING_MINT_MISMATCH: u32 = 6017;
+const ERR_FOREIGN_ACCOUNT_OWNER: u32 = 6018;
 const ERR_CUSTODY_NOT_OWNED_BY_VAULT: u32 = 6020;
 const ERR_RUNG_INSTRUMENT_MISMATCH: u32 = 6027;
 const ERR_NOTHING_TO_MAINTAIN: u32 = 6029;
+const ERR_MISSING_ROLL_ACCOUNTS: u32 = 6031;
+const ERR_INSTRUMENT_FLAGGED: u32 = 6032;
 const ERR_ANCHOR_CONSTRAINT_ASSOCIATED: u32 = 2009;
 const ERR_ANCHOR_CONSTRAINT_TOKEN_OWNER: u32 = 2015;
 /// mock_issuer's own code, surfaced through the CPI.
@@ -348,6 +354,7 @@ fn maintain_ix(profile: RiskProfile, rung_index: u8) -> Instruction {
     ];
     for index in 0..RUNG_COUNT {
         metas.push(AccountMeta::new_readonly(instrument_pda(index).0, false));
+        metas.push(AccountMeta::new_readonly(rating_pda(index).0, false));
     }
 
     Instruction::new_with_bytes(
@@ -355,6 +362,22 @@ fn maintain_ix(profile: RiskProfile, rung_index: u8) -> Instruction {
         &bond_ladder::instruction::Maintain { rung_index }.data(),
         metas,
     )
+}
+
+/// A rating check with nothing to roll: every account the roll alone needs
+/// is left out, which Anchor reads as the program's own address.
+fn check_ix(profile: RiskProfile, rung_index: u8) -> Instruction {
+    const VAULT_POSITION_AND_ORACLE: [usize; 3] = [0, 1, 4];
+    const NAMED_ACCOUNTS: usize = 15;
+
+    let mut ix = maintain_ix(profile, rung_index);
+    for (slot, meta) in ix.accounts.iter_mut().enumerate().take(NAMED_ACCOUNTS) {
+        if !VAULT_POSITION_AND_ORACLE.contains(&slot) {
+            *meta = AccountMeta::new_readonly(program_id(), false);
+        }
+    }
+
+    ix
 }
 
 fn accounts(profile: RiskProfile) -> Vec<(Pubkey, Account)> {
@@ -403,7 +426,18 @@ fn accounts(profile: RiskProfile) -> Vec<(Pubkey, Account)> {
             instrument_pda(index).0,
             instrument_account(index, issuer_tag(index), maturity(index), UNIT_PRICE),
         ));
+        accounts.push((rating_pda(index).0, rating_account(index, NOTCH, ROLLED_AT)));
     }
+
+    accounts
+}
+
+fn check_accounts(profile: RiskProfile) -> Vec<(Pubkey, Account)> {
+    let mut accounts = accounts(profile);
+    accounts.push((
+        program_id(),
+        create_program_account_loader_v3(&program_id()),
+    ));
 
     accounts
 }
@@ -446,6 +480,31 @@ fn refused(mollusk: &Mollusk, accounts: &[(Pubkey, Account)], code: u32) {
         accounts,
         &[Check::err(ProgramError::Custom(code))],
     );
+}
+
+fn check_refused(accounts: &[(Pubkey, Account)], code: u32) {
+    setup(CHECKED_AT).process_and_validate_instruction(
+        &check_ix(RiskProfile::Conservative, 0),
+        accounts,
+        &[Check::err(ProgramError::Custom(code))],
+    );
+}
+
+fn with_rating(
+    accounts: Vec<(Pubkey, Account)>,
+    index: usize,
+    notch: u8,
+    updated_at: i64,
+) -> Vec<(Pubkey, Account)> {
+    replacing(
+        accounts,
+        rating_pda(index).0,
+        rating_account(index, notch, updated_at),
+    )
+}
+
+fn flags(position: &Position) -> [bool; RUNG_COUNT] {
+    position.rungs.map(|rung| rung.flagged)
 }
 
 #[test]
@@ -706,8 +765,8 @@ fn the_change_cannot_be_sent_to_anyone_but_the_owner() {
 fn an_instrument_that_does_not_price_its_rung_is_refused() {
     let profile = RiskProfile::Conservative;
     let mut ix = maintain_ix(profile, 0);
-    let last = ix.accounts.len() - 1;
-    ix.accounts[last].pubkey = instrument_pda(NEXT_INDEX).0;
+    let last_instrument = ix.accounts.len() - 2;
+    ix.accounts[last_instrument].pubkey = instrument_pda(NEXT_INDEX).0;
 
     setup(ROLLED_AT).process_and_validate_instruction(
         &ix,
@@ -729,4 +788,184 @@ fn the_new_rung_must_land_in_the_vault_custody() {
         ),
         ERR_CUSTODY_NOT_OWNED_BY_VAULT,
     );
+}
+
+#[test]
+fn a_rung_rated_below_the_profile_is_flagged_by_anyone_and_no_money_moves() {
+    let profile = RiskProfile::Conservative;
+    let ix = check_ix(profile, 0);
+    assert!(ix.accounts.iter().all(|meta| !meta.is_signer));
+
+    let result = setup(CHECKED_AT).process_and_validate_instruction(
+        &ix,
+        &with_rating(check_accounts(profile), 2, FALLEN_NOTCH, CHECKED_AT),
+        &[Check::success()],
+    );
+
+    let position: Position = read(&result, &position_pda(profile).0);
+    let mut expected = ladder_rungs();
+    expected[2].flagged = true;
+    assert_eq!(position.rungs, expected);
+    assert_eq!(position.fee_accrued, FEE_ALREADY_ACCRUED);
+    assert_eq!(position.last_fee_ts, OPENED_AT);
+
+    let vault: Vault = read(&result, &vault_pda().0);
+    assert_eq!(vault.backstop_free_usdc, POOL);
+}
+
+#[test]
+fn a_rating_exactly_on_the_profile_floor_is_nothing_to_maintain() {
+    let floor = RiskProfile::Conservative.worst_allowed_notch();
+
+    check_refused(
+        &with_rating(
+            check_accounts(RiskProfile::Conservative),
+            2,
+            floor,
+            CHECKED_AT,
+        ),
+        ERR_NOTHING_TO_MAINTAIN,
+    );
+}
+
+/// A lapsed oracle says nothing about the rung (FR-025); flagging on silence
+/// would mark every position of the vault at once.
+#[test]
+fn a_fallen_rating_older_than_the_oracle_allows_flags_nothing() {
+    check_refused(
+        &with_rating(
+            check_accounts(RiskProfile::Conservative),
+            2,
+            FALLEN_NOTCH,
+            CHECKED_AT - MAX_AGE_SECS - 1,
+        ),
+        ERR_NOTHING_TO_MAINTAIN,
+    );
+}
+
+/// A breach already on record is no new work, so a second call cannot be
+/// passed off as maintenance.
+#[test]
+fn a_breach_already_flagged_is_nothing_to_maintain() {
+    let profile = RiskProfile::Conservative;
+    let mut rungs = ladder_rungs();
+    rungs[2].flagged = true;
+
+    check_refused(
+        &replacing(
+            with_rating(check_accounts(profile), 2, FALLEN_NOTCH, CHECKED_AT),
+            position_pda(profile).0,
+            position_account(profile, rungs),
+        ),
+        ERR_NOTHING_TO_MAINTAIN,
+    );
+}
+
+#[test]
+fn a_held_rating_the_configured_oracle_does_not_own_is_refused() {
+    let mut forged = rating_account(2, FALLEN_NOTCH, CHECKED_AT);
+    forged.owner = STRANGER;
+
+    check_refused(
+        &replacing(
+            check_accounts(RiskProfile::Conservative),
+            rating_pda(2).0,
+            forged,
+        ),
+        ERR_FOREIGN_ACCOUNT_OWNER,
+    );
+}
+
+#[test]
+fn a_held_rating_of_another_instrument_is_refused() {
+    check_refused(
+        &replacing(
+            check_accounts(RiskProfile::Conservative),
+            rating_pda(2).0,
+            rating_account(3, NOTCH, CHECKED_AT),
+        ),
+        ERR_RATING_MINT_MISMATCH,
+    );
+}
+
+#[test]
+fn a_matured_rung_cannot_be_rolled_without_the_roll_accounts() {
+    let profile = RiskProfile::Conservative;
+
+    setup(ROLLED_AT).process_and_validate_instruction(
+        &check_ix(profile, 0),
+        &check_accounts(profile),
+        &[Check::err(ProgramError::Custom(ERR_MISSING_ROLL_ACCOUNTS))],
+    );
+}
+
+/// The roll is maintenance too (FR-018): it checks the rungs that stay.
+#[test]
+fn a_roll_flags_a_staying_rung_whose_rating_fell() {
+    let profile = RiskProfile::Conservative;
+
+    let result = setup(ROLLED_AT).process_and_validate_instruction(
+        &maintain_ix(profile, 0),
+        &with_rating(accounts(profile), 2, FALLEN_NOTCH, ROLLED_AT),
+        &[Check::success()],
+    );
+
+    let position: Position = read(&result, &position_pda(profile).0);
+    assert_eq!(flags(&position), [false, true, false, false, false]);
+    assert_eq!(position.rungs[1].instrument, anchor_key(mint_key(2)));
+}
+
+/// The old 18-month rung matures inside the new 18-month window, so the
+/// caller can propose rolling into it. Under a flag it takes no new money,
+/// though its rating is back above the floor.
+fn rolling_into_the_longest_rung(flagged: bool) -> (Instruction, Vec<(Pubkey, Account)>) {
+    let profile = RiskProfile::Balanced;
+    let longest = RUNG_COUNT - 1;
+    let longest_custody = Pubkey::new_from_array([140u8; 32]);
+    let (vault, _) = vault_pda();
+
+    let mut rungs = ladder_rungs();
+    rungs[longest].maturity_ts = next_maturity();
+    rungs[longest].flagged = flagged;
+
+    let mut ix = maintain_ix(profile, 0);
+    ix.accounts[10] = AccountMeta::new_readonly(instrument_pda(longest).0, false);
+    ix.accounts[11] = AccountMeta::new_readonly(rating_pda(longest).0, false);
+    ix.accounts[12] = AccountMeta::new(mint_key(longest), false);
+    ix.accounts[13] = AccountMeta::new(longest_custody, false);
+
+    let mut set = replacing(
+        replacing(
+            accounts(profile),
+            position_pda(profile).0,
+            position_account(profile, rungs),
+        ),
+        instrument_pda(longest).0,
+        instrument_account(longest, issuer_tag(longest), next_maturity(), NEXT_PRICE),
+    );
+    set.push((mint_key(longest), mint_account(UNITS_PER_RUNG)));
+    set.push((
+        longest_custody,
+        token_account(mint_key(longest), vault, UNITS_PER_RUNG),
+    ));
+
+    (ix, set)
+}
+
+#[test]
+fn a_roll_into_an_instrument_the_ladder_holds_under_a_flag_is_refused() {
+    let (ix, set) = rolling_into_the_longest_rung(true);
+
+    setup(ROLLED_AT).process_and_validate_instruction(
+        &ix,
+        &set,
+        &[Check::err(ProgramError::Custom(ERR_INSTRUMENT_FLAGGED))],
+    );
+}
+
+#[test]
+fn the_same_roll_into_an_unflagged_instrument_passes() {
+    let (ix, set) = rolling_into_the_longest_rung(false);
+
+    setup(ROLLED_AT).process_and_validate_instruction(&ix, &set, &[Check::success()]);
 }

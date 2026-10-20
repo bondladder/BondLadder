@@ -60,8 +60,12 @@ pub enum LadderError {
     RungInstrumentMismatch,
     #[msg("The exit would pay less than the floor signed for with the quote")]
     QuoteDrift,
-    #[msg("The rung has not matured yet, so there is nothing to maintain")]
+    #[msg("Nothing to maintain: the rung has not matured and no rating has newly fallen below the profile")]
     NothingToMaintain,
     #[msg("The route reported a redemption other than what it paid into the vault")]
     RedemptionMisreported,
+    #[msg("A matured rung is rolled only with the accounts of the redemption and the purchase")]
+    MissingRollAccounts,
+    #[msg("The ladder holds this instrument under a rating flag, so no new money goes into it")]
+    InstrumentFlagged,
 }
