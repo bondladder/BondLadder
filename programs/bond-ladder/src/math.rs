@@ -34,6 +34,14 @@ pub fn accrue_fee(value_micro: u64, fee_bps: u16, elapsed_seconds: u64) -> Resul
     u64::try_from(numerator / DENOMINATOR).map_err(|_| error!(LadderError::MathOverflow))
 }
 
+/// The caller's share of what a maintenance call serviced (FR-018). Floored,
+/// so the pool that pays it never gives more than the declared rate.
+pub fn crank_reward(serviced_micro: u64, reward_bps: u16) -> Result<u64> {
+    let reward = u128::from(serviced_micro) * u128::from(reward_bps) / u128::from(BPS_DENOMINATOR);
+
+    u64::try_from(reward).map_err(|_| error!(LadderError::MathOverflow))
+}
+
 /// A rung as the exit quote sees it. The entry price has no place here: FR-013
 /// quotes the exit off what the instruments are worth today, not off what the
 /// route paid for them.
@@ -947,6 +955,59 @@ mod tests {
                 "{}",
                 case_name(entry)
             );
+        }
+    }
+
+    #[test]
+    fn crank_rewards_match_the_shared_fixture() {
+        let fixture = fixture();
+        let cases = fixture["crankReward"]
+            .as_array()
+            .expect("crankReward is an array");
+        assert!(!cases.is_empty());
+
+        for entry in cases {
+            let reward = crank_reward(wide(&entry["servicedMicro"]), bps(&entry["rewardBps"]))
+                .expect("a fixture case does not overflow");
+
+            assert_eq!(
+                reward,
+                wide(&entry["expectedMicro"]),
+                "{}",
+                case_name(entry)
+            );
+        }
+    }
+
+    #[test]
+    fn crank_reward_refusals_match_the_shared_fixture() {
+        let fixture = fixture();
+        let cases = fixture["crankRewardRefused"]
+            .as_array()
+            .expect("crankRewardRefused is an array");
+        assert!(!cases.is_empty());
+
+        for entry in cases {
+            let refused = crank_reward(wide(&entry["servicedMicro"]), bps(&entry["rewardBps"]));
+
+            assert_eq!(
+                error_code(refused),
+                u32::from(LadderError::MathOverflow),
+                "{}",
+                case_name(entry)
+            );
+        }
+    }
+
+    #[test]
+    fn a_crank_reward_never_runs_ahead_of_the_exact_share() {
+        for serviced in [1, 999, 1_000, 1_999_999, 200_000_001, THOUSAND_USDC] {
+            let reward = u128::from(crank_reward(serviced, 10).expect("does not overflow"));
+            let exact = u128::from(serviced) * 10;
+            let denominator = u128::from(BPS_DENOMINATOR);
+
+            assert!(reward * denominator <= exact, "{serviced}");
+            assert!((reward + 1) * denominator > exact, "{serviced}");
         }
     }
 

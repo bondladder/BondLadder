@@ -911,5 +911,44 @@
       "nowTs": "1800000000",
       "refusal": "SpreadExceedsValue"
     }
+  ],
+  "crankReward": [
+    {
+      "case": "ten basis points of a 200 USDC face value",
+      "servicedMicro": "200000000",
+      "rewardBps": 10,
+      "expectedMicro": "200000"
+    },
+    {
+      "case": "floored, not rounded",
+      "servicedMicro": "1999999",
+      "rewardBps": 10,
+      "expectedMicro": "1999"
+    },
+    {
+      "case": "a sum too small for one micro-USDC pays nothing",
+      "servicedMicro": "999",
+      "rewardBps": 10,
+      "expectedMicro": "0"
+    },
+    {
+      "case": "nothing serviced pays nothing",
+      "servicedMicro": "0",
+      "rewardBps": 10,
+      "expectedMicro": "0"
+    },
+    {
+      "case": "the whole of the largest sum at the ceiling rate",
+      "servicedMicro": "18446744073709551615",
+      "rewardBps": 10000,
+      "expectedMicro": "18446744073709551615"
+    }
+  ],
+  "crankRewardRefused": [
+    {
+      "case": "a rate above the whole does not fit u64",
+      "servicedMicro": "18446744073709551615",
+      "rewardBps": 65535
+    }
   ]
 }

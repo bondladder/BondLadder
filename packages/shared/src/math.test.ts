@@ -3,6 +3,7 @@ import fixture from '../../../fixtures/math.json'
 import {
   accrueFee,
   BPS_DENOMINATOR,
+  crankReward,
   DAYS_PER_FOUR_YEARS,
   ExitRefusedError,
   exitQuote,
@@ -450,5 +451,27 @@ describe('exit settlement', () => {
         nowTs: NOW_TS,
       }),
     ).toThrow(MathOverflowError)
+  })
+})
+
+describe('crank reward', () => {
+  it('pays exactly what the shared fixture records', () => {
+    for (const entry of fixture.crankReward) {
+      expect(crankReward(BigInt(entry.servicedMicro), entry.rewardBps), entry.case).toBe(
+        BigInt(entry.expectedMicro),
+      )
+    }
+  })
+
+  it('refuses where the program refuses', () => {
+    for (const entry of fixture.crankRewardRefused) {
+      expect(() => crankReward(BigInt(entry.servicedMicro), entry.rewardBps), entry.case).toThrow(
+        MathOverflowError,
+      )
+    }
+  })
+
+  it('refuses a serviced sum that does not fit u64', () => {
+    expect(() => crankReward(U64_MAX + 1n, 10)).toThrow(MathOverflowError)
   })
 })

@@ -17,7 +17,8 @@ const ACCOUNTS_PER_RUNG: usize = 2;
 /// Maintains a position (FR-018): every call checks the rating of each rung
 /// against the profile and flags the ones that fell below it (FR-019), and a
 /// call naming a matured rung also rolls it into the 18-month rung (FR-017).
-/// A call that does neither is refused.
+/// The caller is paid a share of what the call serviced, and a call that
+/// does neither is refused, so the reward cannot be milked (FR-029).
 pub fn maintain<'info>(
     ctx: Context<'_, '_, '_, 'info, Maintain<'info>>,
     rung_index: u8,
@@ -89,20 +90,66 @@ pub fn maintain<'info>(
 
     // A rung an exit has whittled down to nothing has no face value to roll.
     let matured = held[index];
-    if matured.amount == 0 || now_ts < matured.maturity_ts {
+    let rolling = matured.amount > 0 && now_ts >= matured.maturity_ts;
+
+    // A rung flagged on its way out is paid for by its face value.
+    let mut flagged_values = [RungValue::default(); RUNG_COUNT];
+    for (slot, flagged_value) in flagged_values.iter_mut().enumerate() {
+        let flagged_now = !held[slot].flagged && ctx.accounts.position.rungs[slot].flagged;
+        if flagged_now && !(rolling && slot == index) {
+            *flagged_value = values[slot];
+        }
+    }
+    let mut serviced = math::gross_value(&flagged_values)?;
+
+    if rolling {
+        let proceeds = roll(
+            ctx.accounts,
+            &ctx.remaining_accounts[index * ACCOUNTS_PER_RUNG],
+            index,
+            now_ts,
+            &oracle,
+            &values,
+            &issuers,
+        )?;
+        serviced = serviced
+            .checked_add(proceeds)
+            .ok_or_else(|| error!(LadderError::MathOverflow))?;
+    } else {
         require!(newly_flagged > 0, LadderError::NothingToMaintain);
+    }
+
+    pay_crank_reward(ctx.accounts, serviced)
+}
+
+/// The pool pays the reward, so the owner's cost stays the management fee
+/// alone (FR-020). It pays what it has free rather than refuse: a pool spent
+/// on exits must not stall the ladder.
+fn pay_crank_reward(accounts: &mut Maintain, serviced_micro: u64) -> Result<()> {
+    let due = math::crank_reward(serviced_micro, accounts.vault.crank_reward_bps)?;
+    let reward = due.min(accounts.vault.backstop_free_usdc);
+    if reward == 0 {
         return Ok(());
     }
 
-    roll(
-        ctx.accounts,
-        &ctx.remaining_accounts[index * ACCOUNTS_PER_RUNG],
-        index,
-        now_ts,
-        &oracle,
-        &values,
-        &issuers,
-    )
+    let bump = [accounts.vault.bump];
+    let vault_seeds: &[&[u8]] = &[Vault::SEED, &bump];
+    token::transfer(
+        CpiContext::new_with_signer(
+            accounts.token_program.to_account_info(),
+            Transfer {
+                from: accounts.vault_usdc.to_account_info(),
+                to: accounts.caller_usdc.to_account_info(),
+                authority: accounts.vault.to_account_info(),
+            },
+            &[vault_seeds],
+        ),
+        reward,
+    )?;
+
+    accounts.vault.backstop_free_usdc -= reward;
+
+    Ok(())
 }
 
 /// The new instrument is the caller's proposal and is held to the deposit's
@@ -111,7 +158,8 @@ pub fn maintain<'info>(
 ///
 /// The face value pays the fee due first (FR-020), the rest buys whole units,
 /// and the change below one unit's price goes back to the owner in the same
-/// transaction, as it does on the deposit (FR-032).
+/// transaction, as it does on the deposit (FR-032). Returns the face value
+/// redeemed, which is what the roll serviced.
 fn roll<'info>(
     accounts: &mut Maintain<'info>,
     matured_instrument: &AccountInfo<'info>,
@@ -120,10 +168,10 @@ fn roll<'info>(
     oracle: &OracleConfig,
     values: &[RungValue; RUNG_COUNT],
     issuers: &[[u8; 16]; RUNG_COUNT],
-) -> Result<()> {
+) -> Result<u64> {
     let missing = || error!(LadderError::MissingRollAccounts);
     let owner_usdc = accounts.owner_usdc.as_ref().ok_or_else(missing)?;
-    let vault_usdc = accounts.vault_usdc.as_ref().ok_or_else(missing)?;
+    let vault_usdc = &accounts.vault_usdc;
     let issuer_program = accounts.issuer_program.as_ref().ok_or_else(missing)?;
     let issuer_config = accounts.issuer_config.as_ref().ok_or_else(missing)?;
     let issuer_treasury = accounts.issuer_treasury.as_ref().ok_or_else(missing)?;
@@ -133,7 +181,7 @@ fn roll<'info>(
     let next_rating = accounts.next_rating.as_ref().ok_or_else(missing)?;
     let next_mint = accounts.next_mint.as_ref().ok_or_else(missing)?;
     let next_custody = accounts.next_custody.as_ref().ok_or_else(missing)?;
-    let token_program = accounts.token_program.as_ref().ok_or_else(missing)?;
+    let token_program = &accounts.token_program;
 
     let vault_key = accounts.vault.key();
     let matured = accounts.position.rungs[index];
@@ -290,13 +338,14 @@ fn roll<'info>(
     position.fee_accrued = fee_due - fee_charged;
     position.last_fee_ts = now_ts;
 
-    Ok(())
+    Ok(proceeds)
 }
 
 /// No signer: anyone may maintain a position (FR-018), and every account that
-/// moves money is pinned to the vault or to the position's owner. Only the
-/// roll moves money, so a rating check leaves its accounts out. The large
-/// accounts are boxed: six of them on the stack overrun the SBF frame.
+/// moves money is pinned to the vault or to the position's owner, except the
+/// one the reward goes to. Only the roll moves the owner's money, so a rating
+/// check leaves its accounts out. The large accounts are boxed: six of them on
+/// the stack overrun the SBF frame.
 #[derive(Accounts)]
 pub struct Maintain<'info> {
     #[account(
@@ -321,13 +370,14 @@ pub struct Maintain<'info> {
     pub owner_usdc: Option<Box<Account<'info, TokenAccount>>>,
 
     /// The pool's account: the face value lands here, and the purchase, the
-    /// change and the fee are settled out of it within the transaction.
+    /// change, the fee and the reward are settled out of it within the
+    /// transaction.
     #[account(
         mut,
         associated_token::mint = vault.usdc_mint,
         associated_token::authority = vault,
     )]
-    pub vault_usdc: Option<Box<Account<'info, TokenAccount>>>,
+    pub vault_usdc: Box<Account<'info, TokenAccount>>,
 
     /// CHECK: the rating source is configured by address (FR-002); only its
     /// ownership is checked here and the content is read by hand.
@@ -367,5 +417,14 @@ pub struct Maintain<'info> {
     #[account(mut)]
     pub next_custody: Option<Box<Account<'info, TokenAccount>>>,
 
-    pub token_program: Option<Program<'info, Token>>,
+    pub token_program: Program<'info, Token>,
+
+    /// Anyone may call, so the reward may go to any USDC account but the
+    /// pool's own.
+    #[account(
+        mut,
+        token::mint = vault.usdc_mint,
+        constraint = caller_usdc.key() != vault_usdc.key() @ LadderError::RewardIntoPool,
+    )]
+    pub caller_usdc: Box<Account<'info, TokenAccount>>,
 }

@@ -44,6 +44,7 @@ const STRANGER: Pubkey = Pubkey::new_from_array([13u8; 32]);
 const ISSUER_TREASURY: Pubkey = Pubkey::new_from_array([33u8; 32]);
 const MATURED_CUSTODY: Pubkey = Pubkey::new_from_array([120u8; 32]);
 const NEXT_CUSTODY: Pubkey = Pubkey::new_from_array([129u8; 32]);
+const CALLER_USDC: Pubkey = Pubkey::new_from_array([150u8; 32]);
 
 const UNITS_PER_RUNG: u64 = 200;
 const POOL_UNITS: u64 = 50;
@@ -71,6 +72,11 @@ const UNITS_BOUGHT: u64 = 207;
 const SPENT: u64 = UNITS_BOUGHT * NEXT_PRICE;
 const CHANGE: u64 = 45_736;
 
+// Ten basis points of what the call serviced, paid by the pool: the face
+// value on a roll, and today's value of 200 units at 0.99 on a new flag.
+const ROLL_REWARD: u64 = 200_000;
+const FLAG_REWARD: u64 = 198_000;
+
 const ERR_RATING_BELOW_FLOOR: u32 = 6006;
 const ERR_MATURITY_OUTSIDE_WINDOW: u32 = 6007;
 const ERR_ISSUER_LIMIT_EXCEEDED: u32 = 6008;
@@ -83,7 +89,9 @@ const ERR_RUNG_INSTRUMENT_MISMATCH: u32 = 6027;
 const ERR_NOTHING_TO_MAINTAIN: u32 = 6029;
 const ERR_MISSING_ROLL_ACCOUNTS: u32 = 6031;
 const ERR_INSTRUMENT_FLAGGED: u32 = 6032;
+const ERR_REWARD_INTO_POOL: u32 = 6033;
 const ERR_ANCHOR_CONSTRAINT_ASSOCIATED: u32 = 2009;
+const ERR_ANCHOR_CONSTRAINT_TOKEN_MINT: u32 = 2014;
 const ERR_ANCHOR_CONSTRAINT_TOKEN_OWNER: u32 = 2015;
 /// mock_issuer's own code, surfaced through the CPI.
 const ERR_ISSUER_TREASURY_SHORT: u32 = 6007;
@@ -225,6 +233,10 @@ fn mint_account(supply: u64) -> Account {
 }
 
 fn vault_account(paused: bool) -> Account {
+    vault_account_with_free_pool(paused, POOL)
+}
+
+fn vault_account_with_free_pool(paused: bool, backstop_free_usdc: u64) -> Account {
     owned_by(
         &Vault {
             admin: anchor_key(ADMIN),
@@ -237,7 +249,7 @@ fn vault_account(paused: bool) -> Account {
             min_deposit: 100_000_000,
             capacity_usdc: 10 * THOUSAND_USDC,
             total_principal_usdc: OTHER_POSITIONS_PRINCIPAL + PRINCIPAL,
-            backstop_free_usdc: POOL,
+            backstop_free_usdc,
             backstop_locked_value: 0,
             paused,
             bump: vault_pda().1,
@@ -351,6 +363,7 @@ fn maintain_ix(profile: RiskProfile, rung_index: u8) -> Instruction {
         AccountMeta::new(mint_key(NEXT_INDEX), false),
         AccountMeta::new(NEXT_CUSTODY, false),
         AccountMeta::new_readonly(mollusk_svm_programs_token::token::ID, false),
+        AccountMeta::new(CALLER_USDC, false),
     ];
     for index in 0..RUNG_COUNT {
         metas.push(AccountMeta::new_readonly(instrument_pda(index).0, false));
@@ -365,14 +378,16 @@ fn maintain_ix(profile: RiskProfile, rung_index: u8) -> Instruction {
 }
 
 /// A rating check with nothing to roll: every account the roll alone needs
-/// is left out, which Anchor reads as the program's own address.
+/// is left out, which Anchor reads as the program's own address. The pool's
+/// account, the token program and the caller's account stay, since the pool
+/// pays the reward.
 fn check_ix(profile: RiskProfile, rung_index: u8) -> Instruction {
-    const VAULT_POSITION_AND_ORACLE: [usize; 3] = [0, 1, 4];
-    const NAMED_ACCOUNTS: usize = 15;
+    const ACCOUNTS_OF_EVERY_CALL: [usize; 6] = [0, 1, 3, 4, 14, 15];
+    const NAMED_ACCOUNTS: usize = 16;
 
     let mut ix = maintain_ix(profile, rung_index);
     for (slot, meta) in ix.accounts.iter_mut().enumerate().take(NAMED_ACCOUNTS) {
-        if !VAULT_POSITION_AND_ORACLE.contains(&slot) {
+        if !ACCOUNTS_OF_EVERY_CALL.contains(&slot) {
             *meta = AccountMeta::new_readonly(program_id(), false);
         }
     }
@@ -420,6 +435,7 @@ fn accounts(profile: RiskProfile) -> Vec<(Pubkey, Account)> {
         (mint_key(NEXT_INDEX), mint_account(0)),
         (NEXT_CUSTODY, token_account(mint_key(NEXT_INDEX), vault, 0)),
         mollusk_svm_programs_token::token::keyed_account(),
+        (CALLER_USDC, token_account(USDC_MINT, STRANGER, 0)),
     ];
     for index in 0..RUNG_COUNT {
         accounts.push((
@@ -530,7 +546,11 @@ fn a_matured_rung_is_rolled_into_the_eighteen_month_rung_by_anyone() {
         token_balance(&result, &ISSUER_TREASURY),
         TREASURY - PAR_PAID + SPENT
     );
-    assert_eq!(token_balance(&result, &vault_usdc()), POOL + FEE_DUE);
+    assert_eq!(
+        token_balance(&result, &vault_usdc()),
+        POOL + FEE_DUE - ROLL_REWARD
+    );
+    assert_eq!(token_balance(&result, &CALLER_USDC), ROLL_REWARD);
     assert_eq!(token_balance(&result, &ata(OWNER)), OWNER_BALANCE + CHANGE);
     assert_eq!(token_balance(&result, &MATURED_CUSTODY), POOL_UNITS);
     assert_eq!(mint_supply(&result, &mint_key(0)), POOL_UNITS);
@@ -538,7 +558,7 @@ fn a_matured_rung_is_rolled_into_the_eighteen_month_rung_by_anyone() {
     assert_eq!(mint_supply(&result, &mint_key(NEXT_INDEX)), UNITS_BOUGHT);
 
     let vault: Vault = read(&result, &vault_pda().0);
-    assert_eq!(vault.backstop_free_usdc, POOL + FEE_DUE);
+    assert_eq!(vault.backstop_free_usdc, POOL + FEE_DUE - ROLL_REWARD);
     assert_eq!(
         vault.total_principal_usdc,
         OTHER_POSITIONS_PRINCIPAL + PRINCIPAL,
@@ -790,8 +810,10 @@ fn the_new_rung_must_land_in_the_vault_custody() {
     );
 }
 
+/// The owner's money does not move: the fee waits for the next roll or exit,
+/// and the reward comes out of the pool.
 #[test]
-fn a_rung_rated_below_the_profile_is_flagged_by_anyone_and_no_money_moves() {
+fn a_rung_rated_below_the_profile_is_flagged_by_anyone_for_a_reward_from_the_pool() {
     let profile = RiskProfile::Conservative;
     let ix = check_ix(profile, 0);
     assert!(ix.accounts.iter().all(|meta| !meta.is_signer));
@@ -810,7 +832,81 @@ fn a_rung_rated_below_the_profile_is_flagged_by_anyone_and_no_money_moves() {
     assert_eq!(position.last_fee_ts, OPENED_AT);
 
     let vault: Vault = read(&result, &vault_pda().0);
-    assert_eq!(vault.backstop_free_usdc, POOL);
+    assert_eq!(vault.backstop_free_usdc, POOL - FLAG_REWARD);
+    assert_eq!(token_balance(&result, &vault_usdc()), POOL - FLAG_REWARD);
+    assert_eq!(token_balance(&result, &CALLER_USDC), FLAG_REWARD);
+}
+
+#[test]
+fn every_rung_flagged_in_one_call_counts_toward_the_reward() {
+    let profile = RiskProfile::Conservative;
+
+    let result = setup(CHECKED_AT).process_and_validate_instruction(
+        &check_ix(profile, 0),
+        &with_rating(
+            with_rating(check_accounts(profile), 1, FALLEN_NOTCH, CHECKED_AT),
+            3,
+            FALLEN_NOTCH,
+            CHECKED_AT,
+        ),
+        &[Check::success()],
+    );
+
+    assert_eq!(token_balance(&result, &CALLER_USDC), 2 * FLAG_REWARD);
+}
+
+/// Maintenance must not stall on an empty pool: the ladder keeps rolling and
+/// flagging, and the caller takes what the pool has free.
+#[test]
+fn a_pool_short_of_the_reward_pays_what_it_has_free() {
+    let profile = RiskProfile::Conservative;
+
+    for free in [FLAG_REWARD - 1, 0] {
+        let result = setup(CHECKED_AT).process_and_validate_instruction(
+            &check_ix(profile, 0),
+            &replacing(
+                with_rating(check_accounts(profile), 2, FALLEN_NOTCH, CHECKED_AT),
+                vault_pda().0,
+                vault_account_with_free_pool(false, free),
+            ),
+            &[Check::success()],
+        );
+
+        let position: Position = read(&result, &position_pda(profile).0);
+        assert!(position.rungs[2].flagged, "free pool {free}");
+        let vault: Vault = read(&result, &vault_pda().0);
+        assert_eq!(vault.backstop_free_usdc, 0, "free pool {free}");
+        assert_eq!(token_balance(&result, &CALLER_USDC), free);
+    }
+}
+
+#[test]
+fn the_reward_is_paid_only_in_usdc() {
+    let profile = RiskProfile::Conservative;
+
+    check_refused(
+        &replacing(
+            with_rating(check_accounts(profile), 2, FALLEN_NOTCH, CHECKED_AT),
+            CALLER_USDC,
+            token_account(mint_key(NEXT_INDEX), STRANGER, 0),
+        ),
+        ERR_ANCHOR_CONSTRAINT_TOKEN_MINT,
+    );
+}
+
+/// A reward paid into the pool's own account would leave the USDC in place
+/// and the free pool short of it.
+#[test]
+fn the_reward_cannot_be_paid_into_the_pool_itself() {
+    let profile = RiskProfile::Conservative;
+    let mut ix = check_ix(profile, 0);
+    ix.accounts[15].pubkey = vault_usdc();
+
+    setup(CHECKED_AT).process_and_validate_instruction(
+        &ix,
+        &with_rating(check_accounts(profile), 2, FALLEN_NOTCH, CHECKED_AT),
+        &[Check::err(ProgramError::Custom(ERR_REWARD_INTO_POOL))],
+    );
 }
 
 #[test]
@@ -913,6 +1009,24 @@ fn a_roll_flags_a_staying_rung_whose_rating_fell() {
     let position: Position = read(&result, &position_pda(profile).0);
     assert_eq!(flags(&position), [false, true, false, false, false]);
     assert_eq!(position.rungs[1].instrument, anchor_key(mint_key(2)));
+    assert_eq!(
+        token_balance(&result, &CALLER_USDC),
+        ROLL_REWARD + FLAG_REWARD
+    );
+}
+
+/// The face value already pays for the rung leaving the ladder.
+#[test]
+fn a_matured_rung_flagged_on_its_way_out_is_not_paid_for_twice() {
+    let profile = RiskProfile::Conservative;
+
+    let result = setup(ROLLED_AT).process_and_validate_instruction(
+        &maintain_ix(profile, 0),
+        &with_rating(accounts(profile), 0, FALLEN_NOTCH, ROLLED_AT),
+        &[Check::success()],
+    );
+
+    assert_eq!(token_balance(&result, &CALLER_USDC), ROLL_REWARD);
 }
 
 /// The old 18-month rung matures inside the new 18-month window, so the

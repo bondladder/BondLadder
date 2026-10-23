@@ -68,4 +68,6 @@ pub enum LadderError {
     MissingRollAccounts,
     #[msg("The ladder holds this instrument under a rating flag, so no new money goes into it")]
     InstrumentFlagged,
+    #[msg("The maintenance reward cannot be paid into the backstop pool's own account")]
+    RewardIntoPool,
 }

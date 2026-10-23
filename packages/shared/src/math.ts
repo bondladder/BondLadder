@@ -266,3 +266,16 @@ export function settleExit(input: SettleExitInput): ExitSettlement {
     principalMicro: shareOf(input.principalMicro, input.shareBps),
   }
 }
+
+export function crankReward(servicedMicro: bigint, rewardBps: number): bigint {
+  requireWidth(fitsU64(servicedMicro), 'serviced sum does not fit u64')
+  requireWidth(
+    Number.isInteger(rewardBps) && rewardBps >= 0 && rewardBps <= U16_MAX,
+    'reward rate does not fit u16',
+  )
+
+  const reward = (servicedMicro * BigInt(rewardBps)) / BPS_DENOMINATOR
+  requireWidth(fitsU64(reward), 'reward does not fit u64')
+
+  return reward
+}
