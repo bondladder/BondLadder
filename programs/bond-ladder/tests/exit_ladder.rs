@@ -701,6 +701,12 @@ fn a_payout_above_the_signed_floor_goes_through() {
     );
 
     assert!(token_balance(&result, &OWNER_USDC) > FULL_EXIT_PAYOUT);
+
+    let pool: Vault = stored(&result, &vault_pda().0);
+    assert_eq!(
+        pool.backstop_locked_value, THOUSAND_USDC,
+        "the pool books the instruments at the face value they redeem for, not at today's price"
+    );
 }
 
 /// FR-015: a pool one micro-USDC short of the exit refuses it rather than

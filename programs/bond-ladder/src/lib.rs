@@ -71,4 +71,8 @@ pub mod bond_ladder {
     ) -> Result<()> {
         instructions::maintain::maintain(ctx, rung_index)
     }
+
+    pub fn redeem_backstop(ctx: Context<RedeemBackstop>) -> Result<()> {
+        instructions::maintain::redeem_backstop(ctx)
+    }
 }

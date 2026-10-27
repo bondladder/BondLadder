@@ -42,6 +42,17 @@ pub struct BackstopWithdrawn {
     pub obligations_usdc: u64,
 }
 
+/// Both pool counters after the redemption ride along, so the logs show the
+/// face value leaving the locked side and arriving on the free one (FR-031).
+#[event]
+pub struct BackstopRedeemed {
+    pub instrument: Pubkey,
+    pub units: u64,
+    pub proceeds_micro: u64,
+    pub backstop_free_usdc: u64,
+    pub backstop_locked_value: u64,
+}
+
 /// One rung's share of an exit. Price and rating are read at the exit rather
 /// than copied from the entry: they are what the pool took the risk on at.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]

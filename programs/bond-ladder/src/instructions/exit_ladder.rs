@@ -9,6 +9,7 @@ use crate::events::{ExitedRung, LadderExited};
 use crate::instructions::open_ladder::read_owned;
 use crate::math::{self, RungValue};
 use crate::profiles::RUNG_COUNT;
+use crate::route;
 use crate::state::{BackstopHolding, Position, Rung, Vault, BPS_DENOMINATOR};
 
 /// The instrument that prices the rung, its rating for the event, and the
@@ -99,12 +100,18 @@ pub fn exit_ladder<'info>(
         LadderError::QuoteDrift
     );
 
+    let units_taken = settled
+        .units
+        .iter()
+        .try_fold(0u64, |sum, units| sum.checked_add(*units))
+        .ok_or_else(|| error!(LadderError::MathOverflow))?;
+
     // A pool short of the payout refuses the exit whole rather than paying
     // what it has: a smaller exit is one the owner has to choose (FR-015).
     ctx.accounts.vault.take_exit(
         settled.payout_micro,
         settled.principal_micro,
-        settled.gross_value_micro,
+        route::face_value(units_taken)?,
     )?;
 
     for (index, chunk) in ctx

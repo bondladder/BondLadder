@@ -70,4 +70,6 @@ pub enum LadderError {
     InstrumentFlagged,
     #[msg("The maintenance reward cannot be paid into the backstop pool's own account")]
     RewardIntoPool,
+    #[msg("Nothing to redeem: the pool holds no units of the instrument, or it has not matured")]
+    NothingToRedeem,
 }

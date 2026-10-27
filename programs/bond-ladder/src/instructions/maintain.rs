@@ -4,12 +4,13 @@ use mock_issuer::state::Instrument;
 use rating_oracle::state::{OracleConfig, RatingRecord};
 
 use crate::errors::LadderError;
+use crate::events::BackstopRedeemed;
 use crate::instructions::open_ladder::read_owned;
 use crate::math::{self, RungValue};
 use crate::profiles::RUNG_COUNT;
 use crate::route::{self, RedemptionVenue, Venue};
 use crate::selection::{verify_roll, RollCandidate, ROLL_MONTHS};
-use crate::state::{Position, Rung, Vault};
+use crate::state::{BackstopHolding, Position, Rung, Vault};
 
 /// An instrument and its rating record for every rung, in ladder order.
 const ACCOUNTS_PER_RUNG: usize = 2;
@@ -339,6 +340,110 @@ fn roll<'info>(
     position.last_fee_ts = now_ts;
 
     Ok(proceeds)
+}
+
+/// Redeems the pool's holding of a matured instrument back into free USDC
+/// (FR-031). It is not a position's maintenance (FR-018), so it pays no
+/// reward, and the pause does not stop it: it refills the pool the exits are
+/// paid from, and the pause must not block an exit (FR-023).
+pub fn redeem_backstop(ctx: Context<RedeemBackstop>) -> Result<()> {
+    let holding = &ctx.accounts.holding;
+    require!(
+        holding.amount > 0 && Clock::get()?.unix_timestamp >= holding.maturity_ts,
+        LadderError::NothingToRedeem
+    );
+    let units = holding.amount;
+    let instrument = holding.instrument;
+
+    let bump = [ctx.accounts.vault.bump];
+    let vault_seeds: &[&[u8]] = &[Vault::SEED, &bump];
+    let proceeds = route::redeem_at_maturity(
+        RedemptionVenue {
+            program: ctx.accounts.issuer_program.to_account_info(),
+            config: ctx.accounts.issuer_config.to_account_info(),
+            instrument: ctx.accounts.instrument.to_account_info(),
+            instrument_mint: ctx.accounts.instrument_mint.to_account_info(),
+            holder_instrument: ctx.accounts.custody.to_account_info(),
+            holder_usdc: ctx.accounts.vault_usdc.to_account_info(),
+            venue_usdc: ctx.accounts.issuer_treasury.to_account_info(),
+            authority: ctx.accounts.vault.to_account_info(),
+            token_program: ctx.accounts.token_program.to_account_info(),
+        },
+        units,
+        &[vault_seeds],
+    )?;
+
+    let vault = &mut ctx.accounts.vault;
+    vault.take_redemption(route::face_value(units)?, proceeds)?;
+    ctx.accounts.holding.amount = 0;
+
+    emit!(BackstopRedeemed {
+        instrument,
+        units,
+        proceeds_micro: proceeds,
+        backstop_free_usdc: vault.backstop_free_usdc,
+        backstop_locked_value: vault.backstop_locked_value,
+    });
+
+    Ok(())
+}
+
+/// No signer, as on `maintain`. The holding is kept at zero rather than
+/// closed: the exiting owner paid its rent, and a later exit through the same
+/// instrument reuses it.
+#[derive(Accounts)]
+pub struct RedeemBackstop<'info> {
+    #[account(
+        mut,
+        seeds = [Vault::SEED],
+        bump = vault.bump,
+    )]
+    pub vault: Account<'info, Vault>,
+
+    #[account(
+        mut,
+        seeds = [BackstopHolding::SEED, holding.instrument.as_ref()],
+        bump = holding.bump,
+    )]
+    pub holding: Account<'info, BackstopHolding>,
+
+    #[account(
+        mut,
+        associated_token::mint = vault.usdc_mint,
+        associated_token::authority = vault,
+    )]
+    pub vault_usdc: Account<'info, TokenAccount>,
+
+    /// CHECK: the boundary of the liquidity route (FR-021) — the vault knows
+    /// only its address.
+    #[account(address = vault.issuer_program)]
+    pub issuer_program: UncheckedAccount<'info>,
+
+    /// CHECK: an internal account of the route, which the route checks.
+    #[account(owner = vault.issuer_program @ LadderError::ForeignAccountOwner)]
+    pub issuer_config: UncheckedAccount<'info>,
+
+    /// CHECK: the route's treasury, checked by the route itself.
+    #[account(mut)]
+    pub issuer_treasury: UncheckedAccount<'info>,
+
+    /// CHECK: the route checks it against the mint it burns from.
+    pub instrument: UncheckedAccount<'info>,
+
+    /// CHECK: the route burns from it and checks it against the instrument.
+    #[account(mut)]
+    pub instrument_mint: UncheckedAccount<'info>,
+
+    /// The vault keeps one custody per instrument for positions and pool
+    /// alike, so only the holding's units leave it.
+    #[account(
+        mut,
+        constraint = custody.owner == vault.key() && custody.mint == holding.instrument
+            @ LadderError::CustodyNotOwnedByVault,
+    )]
+    pub custody: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
 }
 
 /// No signer: anyone may maintain a position (FR-018), and every account that

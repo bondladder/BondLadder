@@ -111,6 +111,14 @@ pub fn redeem_at_maturity(
     accept_redemption(units, redemption.units, redemption.paid_micro, received)
 }
 
+/// What the route pays for matured units (FR-026).
+pub fn face_value(units: u64) -> Result<u64> {
+    u128::from(units)
+        .checked_mul(u128::from(mock_issuer::state::Instrument::PAR_MICRO))
+        .and_then(|face| u64::try_from(face).ok())
+        .ok_or_else(|| error!(LadderError::MathOverflow))
+}
+
 fn usdc_balance(account: &AccountInfo<'_>) -> Result<u64> {
     let data = account.try_borrow_data()?;
 
@@ -228,6 +236,20 @@ mod tests {
         assert_eq!(
             redemption_error(accept_redemption(200, 200, 0, 0)),
             u32::from(LadderError::RedemptionMisreported)
+        );
+    }
+
+    #[test]
+    fn the_face_value_is_one_usdc_a_unit() {
+        assert_eq!(face_value(250).expect("fits"), 250_000_000);
+        assert_eq!(face_value(0).expect("fits"), 0);
+    }
+
+    #[test]
+    fn a_face_value_beyond_u64_is_refused() {
+        assert_eq!(
+            redemption_error(face_value(u64::MAX)),
+            u32::from(LadderError::MathOverflow)
         );
     }
 }

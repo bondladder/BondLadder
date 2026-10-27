@@ -60,13 +60,15 @@ impl Vault {
     }
 
     /// The pool pays the exit out of free USDC and takes on the instruments
-    /// at today's value (FR-031), and the principal leaving the vault stops
-    /// holding up the withdrawal floor. All three move or none does.
+    /// at the face value they redeem for (FR-031), so that the redemption
+    /// moves the same amount back out of the locked counter. The principal
+    /// leaving the vault stops holding up the withdrawal floor. All three
+    /// move or none does.
     pub fn take_exit(
         &mut self,
         payout_micro: u64,
         principal_micro: u64,
-        instruments_value_micro: u64,
+        instruments_face_micro: u64,
     ) -> Result<()> {
         let free = self
             .backstop_free_usdc
@@ -78,12 +80,26 @@ impl Vault {
             .ok_or_else(|| error!(LadderError::MathOverflow))?;
         let locked = self
             .backstop_locked_value
-            .checked_add(instruments_value_micro)
+            .checked_add(instruments_face_micro)
             .ok_or_else(|| error!(LadderError::MathOverflow))?;
 
         self.backstop_free_usdc = free;
         self.total_principal_usdc = principal;
         self.backstop_locked_value = locked;
+
+        Ok(())
+    }
+
+    /// The instruments the pool took on come back as free USDC at maturity
+    /// (FR-031). Exits before the counter was kept at face booked today's
+    /// lower price, so their face value can exceed what is left of it: the
+    /// counter runs down to zero rather than wedge the holding.
+    pub fn take_redemption(&mut self, face_micro: u64, proceeds_micro: u64) -> Result<()> {
+        self.backstop_free_usdc = self
+            .backstop_free_usdc
+            .checked_add(proceeds_micro)
+            .ok_or_else(|| error!(LadderError::MathOverflow))?;
+        self.backstop_locked_value = self.backstop_locked_value.saturating_sub(face_micro);
 
         Ok(())
     }
@@ -454,9 +470,10 @@ mod tests {
         );
     }
 
-    /// FR-031: the pool pays out free USDC and takes on the instruments, and
-    /// the principal leaving the vault stops counting toward the floor, or the
-    /// floor would outlive the positions it protects (FR-027).
+    /// FR-031: the pool pays out free USDC and takes on the instruments at the
+    /// face value they will redeem for, and the principal leaving the vault
+    /// stops counting toward the floor, or the floor would outlive the
+    /// positions it protects (FR-027).
     #[test]
     fn an_exit_moves_all_three_pool_counters_at_once() {
         let mut pool = vault(5 * THOUSAND_USDC, 3 * THOUSAND_USDC);
@@ -467,6 +484,49 @@ mod tests {
         assert_eq!(pool.backstop_free_usdc, 5 * THOUSAND_USDC - 980_000_000);
         assert_eq!(pool.total_principal_usdc, 2 * THOUSAND_USDC);
         assert_eq!(pool.backstop_locked_value, 7 + 1_010_000_000);
+    }
+
+    /// FR-031: at maturity the instruments the pool took on come back as free
+    /// USDC, and the face value booked for them leaves the locked counter.
+    #[test]
+    fn a_redemption_turns_locked_face_value_into_free_usdc() {
+        let mut pool = vault(THOUSAND_USDC, 3 * THOUSAND_USDC);
+        pool.backstop_locked_value = 250_000_000 + 7;
+
+        pool.take_redemption(250_000_000, 250_000_000)
+            .expect("the pool takes the redemption");
+
+        assert_eq!(pool.backstop_free_usdc, THOUSAND_USDC + 250_000_000);
+        assert_eq!(pool.backstop_locked_value, 7);
+        assert_eq!(
+            pool.total_principal_usdc,
+            3 * THOUSAND_USDC,
+            "the pool's own instruments are no one's principal"
+        );
+    }
+
+    #[test]
+    fn a_redemption_of_more_than_was_booked_releases_the_locked_counter_to_zero() {
+        let mut pool = vault(THOUSAND_USDC, 0);
+
+        pool.take_redemption(250_000_000, 250_000_000)
+            .expect("the pool takes the redemption");
+
+        assert_eq!(pool.backstop_locked_value, 0);
+        assert_eq!(pool.backstop_free_usdc, THOUSAND_USDC + 250_000_000);
+    }
+
+    #[test]
+    fn a_redemption_that_overflows_the_free_pool_changes_nothing() {
+        let mut pool = vault(u64::MAX, 0);
+        pool.backstop_locked_value = 250_000_000;
+
+        assert_eq!(
+            error_code(pool.take_redemption(250_000_000, 1)),
+            u32::from(LadderError::MathOverflow)
+        );
+        assert_eq!(pool.backstop_free_usdc, u64::MAX);
+        assert_eq!(pool.backstop_locked_value, 250_000_000);
     }
 
     #[test]

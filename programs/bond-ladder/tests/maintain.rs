@@ -5,10 +5,15 @@
 //! again (FR-005, SC-004).
 
 use {
-    anchor_lang::{AccountDeserialize, AccountSerialize, InstructionData, Space},
+    anchor_lang::{
+        AccountDeserialize, AccountSerialize, AnchorDeserialize, Discriminator, InstructionData,
+        Space,
+    },
+    base64::{prelude::BASE64_STANDARD, Engine},
     bond_ladder::{
+        events::BackstopRedeemed,
         profiles::{RiskProfile, RUNG_COUNT, RUNG_MONTHS},
-        state::{Position, Rung, Vault},
+        state::{BackstopHolding, Position, Rung, Vault},
     },
     mock_issuer::state::{Instrument, IssuerConfig},
     mollusk_svm::{
@@ -26,8 +31,9 @@ use {
     solana_program_error::ProgramError,
     solana_program_option::COption,
     solana_program_pack::Pack,
+    solana_svm_log_collector::LogCollector,
     spl_token_interface::state::{Account as SplTokenAccount, AccountState, Mint},
-    std::{path::Path, sync::Once},
+    std::{cell::RefCell, path::Path, rc::Rc, sync::Once},
 };
 
 const OPENED_AT: i64 = 1_800_000_000;
@@ -90,6 +96,7 @@ const ERR_NOTHING_TO_MAINTAIN: u32 = 6029;
 const ERR_MISSING_ROLL_ACCOUNTS: u32 = 6031;
 const ERR_INSTRUMENT_FLAGGED: u32 = 6032;
 const ERR_REWARD_INTO_POOL: u32 = 6033;
+const ERR_NOTHING_TO_REDEEM: u32 = 6034;
 const ERR_ANCHOR_CONSTRAINT_ASSOCIATED: u32 = 2009;
 const ERR_ANCHOR_CONSTRAINT_TOKEN_MINT: u32 = 2014;
 const ERR_ANCHOR_CONSTRAINT_TOKEN_OWNER: u32 = 2015;
@@ -1082,4 +1089,253 @@ fn the_same_roll_into_an_unflagged_instrument_passes() {
     let (ix, set) = rolling_into_the_longest_rung(false);
 
     setup(ROLLED_AT).process_and_validate_instruction(&ix, &set, &[Check::success()]);
+}
+
+// The pool's holding of the instrument behind rung 0: units it took on from
+// earlier exits, sharing the vault's custody with the position's own units.
+// The locked counter carries other holdings besides, booked at face value.
+const POOL_FACE: u64 = POOL_UNITS * 1_000_000;
+const OTHER_HOLDINGS_FACE: u64 = 70_000_000;
+
+fn holding_pda() -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[BackstopHolding::SEED, mint_key(0).as_ref()],
+        &program_id(),
+    )
+}
+
+fn holding_account(amount: u64) -> Account {
+    owned_by(
+        &BackstopHolding {
+            instrument: anchor_key(mint_key(0)),
+            amount,
+            maturity_ts: maturity(0),
+            bump: holding_pda().1,
+        },
+        program_id(),
+    )
+}
+
+fn vault_with_locked(paused: bool, locked: u64) -> Account {
+    let account = vault_account(paused);
+    let mut vault = Vault::try_deserialize(&mut &account.data[..]).expect("deserializes");
+    vault.backstop_locked_value = locked;
+
+    owned_by(&vault, program_id())
+}
+
+fn redeem_ix() -> Instruction {
+    Instruction::new_with_bytes(
+        program_id(),
+        &bond_ladder::instruction::RedeemBackstop {}.data(),
+        vec![
+            AccountMeta::new(vault_pda().0, false),
+            AccountMeta::new(holding_pda().0, false),
+            AccountMeta::new(vault_usdc(), false),
+            AccountMeta::new_readonly(issuer_id(), false),
+            AccountMeta::new_readonly(issuer_config_pda().0, false),
+            AccountMeta::new(ISSUER_TREASURY, false),
+            AccountMeta::new_readonly(instrument_pda(0).0, false),
+            AccountMeta::new(mint_key(0), false),
+            AccountMeta::new(MATURED_CUSTODY, false),
+            AccountMeta::new_readonly(mollusk_svm_programs_token::token::ID, false),
+        ],
+    )
+}
+
+fn redeem_accounts() -> Vec<(Pubkey, Account)> {
+    let mut accounts = replacing(
+        accounts(RiskProfile::Conservative),
+        vault_pda().0,
+        vault_with_locked(false, POOL_FACE + OTHER_HOLDINGS_FACE),
+    );
+    accounts.push((holding_pda().0, holding_account(POOL_UNITS)));
+
+    accounts
+}
+
+fn redeem_refused(now_ts: i64, accounts: &[(Pubkey, Account)], code: u32) {
+    setup(now_ts).process_and_validate_instruction(
+        &redeem_ix(),
+        accounts,
+        &[Check::err(ProgramError::Custom(code))],
+    );
+}
+
+/// Events live only in the logs, so the collector is attached without a
+/// limit: a truncated log cannot be told apart from an event never sent.
+fn redeemed_events(logs: &Rc<RefCell<LogCollector>>) -> Vec<BackstopRedeemed> {
+    logs.borrow()
+        .get_recorded_content()
+        .iter()
+        .filter_map(|line| line.strip_prefix("Program data: "))
+        .filter_map(|encoded| BASE64_STANDARD.decode(encoded).ok())
+        .filter(|bytes| bytes.starts_with(BackstopRedeemed::DISCRIMINATOR))
+        .map(|bytes| {
+            BackstopRedeemed::try_from_slice(&bytes[BackstopRedeemed::DISCRIMINATOR.len()..])
+                .expect("event decodes")
+        })
+        .collect()
+}
+
+#[test]
+fn a_matured_holding_returns_the_pool_to_free_usdc_by_anyone() {
+    let logs = LogCollector::new_ref_with_limit(None);
+    let mut mollusk = setup(ROLLED_AT);
+    mollusk.logger = Some(Rc::clone(&logs));
+    let ix = redeem_ix();
+
+    assert!(
+        ix.accounts.iter().all(|meta| !meta.is_signer),
+        "no account has to sign the redemption"
+    );
+
+    let result =
+        mollusk.process_and_validate_instruction(&ix, &redeem_accounts(), &[Check::success()]);
+
+    assert_eq!(token_balance(&result, &vault_usdc()), POOL + POOL_FACE);
+    assert_eq!(
+        token_balance(&result, &ISSUER_TREASURY),
+        TREASURY - POOL_FACE
+    );
+    assert_eq!(
+        token_balance(&result, &MATURED_CUSTODY),
+        UNITS_PER_RUNG,
+        "the position's own units stay in the shared custody"
+    );
+    assert_eq!(mint_supply(&result, &mint_key(0)), UNITS_PER_RUNG);
+
+    let vault: Vault = read(&result, &vault_pda().0);
+    assert_eq!(vault.backstop_free_usdc, POOL + POOL_FACE);
+    assert_eq!(vault.backstop_locked_value, OTHER_HOLDINGS_FACE);
+    assert_eq!(
+        vault.total_principal_usdc,
+        OTHER_POSITIONS_PRINCIPAL + PRINCIPAL
+    );
+
+    let holding: BackstopHolding = read(&result, &holding_pda().0);
+    assert_eq!(holding.amount, 0);
+    assert_eq!(holding.instrument, anchor_key(mint_key(0)));
+
+    let position: Position = read(&result, &position_pda(RiskProfile::Conservative).0);
+    assert_eq!(position.rungs, ladder_rungs());
+
+    let events = redeemed_events(&logs);
+    let [event] = events.as_slice() else {
+        panic!(
+            "expected exactly one redemption event, got {}",
+            events.len()
+        );
+    };
+    assert_eq!(event.instrument, anchor_key(mint_key(0)));
+    assert_eq!(event.units, POOL_UNITS);
+    assert_eq!(event.proceeds_micro, POOL_FACE);
+    assert_eq!(event.backstop_free_usdc, POOL + POOL_FACE);
+    assert_eq!(event.backstop_locked_value, OTHER_HOLDINGS_FACE);
+}
+
+#[test]
+fn a_holding_a_second_before_its_maturity_is_not_redeemed() {
+    redeem_refused(ROLLED_AT - 1, &redeem_accounts(), ERR_NOTHING_TO_REDEEM);
+}
+
+#[test]
+fn a_holding_already_redeemed_is_not_redeemed_again() {
+    redeem_refused(
+        ROLLED_AT,
+        &replacing(redeem_accounts(), holding_pda().0, holding_account(0)),
+        ERR_NOTHING_TO_REDEEM,
+    );
+}
+
+/// The pause stops deposits and maintenance but never an exit (FR-023), and
+/// the redemption only refills the pool that pays the exits.
+#[test]
+fn the_pause_does_not_stop_the_pool_from_redeeming() {
+    let result = setup(ROLLED_AT).process_and_validate_instruction(
+        &redeem_ix(),
+        &replacing(
+            redeem_accounts(),
+            vault_pda().0,
+            vault_with_locked(true, POOL_FACE + OTHER_HOLDINGS_FACE),
+        ),
+        &[Check::success()],
+    );
+
+    let vault: Vault = read(&result, &vault_pda().0);
+    assert_eq!(vault.backstop_free_usdc, POOL + POOL_FACE);
+}
+
+/// Locked value booked before it was kept at face can be lower than the face
+/// value redeemed; it runs down to zero rather than wedge the holding.
+#[test]
+fn a_locked_counter_below_the_face_value_runs_down_to_zero() {
+    let result = setup(ROLLED_AT).process_and_validate_instruction(
+        &redeem_ix(),
+        &replacing(
+            redeem_accounts(),
+            vault_pda().0,
+            vault_with_locked(false, POOL_FACE - 1),
+        ),
+        &[Check::success()],
+    );
+
+    let vault: Vault = read(&result, &vault_pda().0);
+    assert_eq!(vault.backstop_locked_value, 0);
+    assert_eq!(vault.backstop_free_usdc, POOL + POOL_FACE);
+}
+
+#[test]
+fn a_treasury_short_of_the_face_value_refuses_the_redemption_whole() {
+    redeem_refused(
+        ROLLED_AT,
+        &replacing(
+            redeem_accounts(),
+            ISSUER_TREASURY,
+            token_account(USDC_MINT, issuer_config_pda().0, POOL_FACE - 1),
+        ),
+        ERR_ISSUER_TREASURY_SHORT,
+    );
+}
+
+#[test]
+fn the_units_must_come_from_the_vault_custody() {
+    redeem_refused(
+        ROLLED_AT,
+        &replacing(
+            redeem_accounts(),
+            MATURED_CUSTODY,
+            token_account(mint_key(0), STRANGER, UNITS_PER_RUNG + POOL_UNITS),
+        ),
+        ERR_CUSTODY_NOT_OWNED_BY_VAULT,
+    );
+}
+
+#[test]
+fn the_custody_must_hold_the_instrument_of_the_holding() {
+    redeem_refused(
+        ROLLED_AT,
+        &replacing(
+            redeem_accounts(),
+            MATURED_CUSTODY,
+            token_account(mint_key(1), vault_pda().0, UNITS_PER_RUNG + POOL_UNITS),
+        ),
+        ERR_CUSTODY_NOT_OWNED_BY_VAULT,
+    );
+}
+
+/// The face value must land in the pool's own account, or the free counter
+/// would grow by USDC the pool does not hold.
+#[test]
+fn the_face_value_cannot_be_sent_anywhere_but_the_pool() {
+    let mut ix = redeem_ix();
+    ix.accounts[2] = AccountMeta::new(ata(OWNER), false);
+
+    setup(ROLLED_AT).process_and_validate_instruction(
+        &ix,
+        &redeem_accounts(),
+        &[Check::err(ProgramError::Custom(
+            ERR_ANCHOR_CONSTRAINT_TOKEN_OWNER,
+        ))],
+    );
 }
